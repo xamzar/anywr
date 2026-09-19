@@ -34,12 +34,22 @@ async function start(url, env) {
   } catch { d = null; }
   if (!d || d.x < Date.now() / 1000 || !/^[\w-]+$/.test(d.a) || !/^[\w-]+$/.test(d.n))
     return new Response("Start signing in from anywr.me.", { status: 400 });
-  const html = `<!doctype html><meta name=viewport content="width=device-width"><title>anywr</title>
-<body style="font:15px/1.5 system-ui,sans-serif;max-width:320px;margin:15vh auto;padding:0 16px">
+  const html = `<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>anywr</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&display=swap" rel=stylesheet>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:16px;background:#000;color:#ededed;
+ font:15px/1.5 "Instrument Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+form{width:min(360px,100%)}label{display:block;color:#8a8a8a;font-size:14px}
+input{display:block;width:100%;margin:6px 0 24px;padding:6px 0;font:500 28px/1.2 "Instrument Sans",system-ui,sans-serif;
+ letter-spacing:.2em;color:#ededed;background:none;border:0;border-bottom:1px solid #262626;border-radius:0}
+input:focus{outline:none;border-bottom-color:#ededed}
+button{font:500 14px/1 "Instrument Sans",system-ui,sans-serif;color:#000;background:#ededed;border:1px solid #ededed;
+ border-radius:6px;padding:9px 14px;cursor:pointer}button:focus-visible{outline:2px solid #ededed;outline-offset:2px}
+</style>
 <form method=post action="${env.TEAM}/cdn-cgi/access/callback"><label for=code>Code from your email</label>
-<input id=code name=code inputmode=numeric pattern="\\d{6}" autocomplete=one-time-code required autofocus
- style="font:inherit;padding:6px 10px;width:100%;box-sizing:border-box;margin:4px 0 10px">
-<input type=hidden name=nonce value="${d.n}"><button style="font:inherit;padding:6px 10px">Sign in</button></form>`;
+<input id=code name=code inputmode=numeric pattern="\\d{6}" maxlength=6 autocomplete=one-time-code required autofocus>
+<input type=hidden name=nonce value="${d.n}"><button>Sign in</button></form>`;
   return new Response(html, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer",
     "set-cookie": `CF_AppSession=${d.a}; Path=/; Secure; HttpOnly; Max-Age=86400`,

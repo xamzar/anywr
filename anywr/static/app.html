@@ -4,66 +4,100 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>anywr</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: light dark; }
-  body { margin: 0 auto; max-width: 720px; padding: 16px; font: 15px/1.5 system-ui, sans-serif; }
-  button, input { font: inherit; padding: 6px 10px; }
-  input { width: 100%; box-sizing: border-box; margin: 4px 0 10px; }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .grow { flex: 1; }
-  .mono, code, pre { font-family: ui-monospace, monospace; font-size: 13px; }
-  .auth { max-width: 320px; margin: 15vh auto 0; }
-  .err { color: #dc2626; min-height: 1.5em; }
-  .secret { word-break: break-all; margin: 12px 0; }
-  body:has(#dash:not([hidden])) { max-width: none; padding: 0; height: 100dvh; }
-  #dash { height: 100%; display: flex; flex-direction: column; }
-  #dash .row { padding: 4px 8px; }
-  .viewer { flex: 1; width: 100%; border: 0; border-top: 1px solid #8884; }
-  dialog { max-width: 520px; }
-  pre { white-space: pre-wrap; word-break: break-all; }
+  :root { color-scheme: dark; --bg: #000; --fg: #ededed; --muted: #8a8a8a; --line: #262626; --hover: #161616; --err: #ff6b6b;
+    --font: "Instrument Sans", system-ui, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--fg); }
+  body { margin: 0; font: 15px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+  a { color: var(--fg); text-underline-offset: 3px; text-decoration-color: var(--muted); }
+  button { font: 500 14px/1 var(--font); color: var(--fg); background: none; border: 1px solid var(--line);
+    border-radius: 6px; padding: 9px 14px; cursor: pointer; }
+  button:hover { background: var(--hover); }
+  button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  button.primary:hover { background: #fff; }
+  :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .mono, pre { font-family: var(--mono); font-size: 13px; }
   [hidden] { display: none !important; }
+
+  /* Sign in / sign up: one big bare field. */
+  .auth { min-height: 100dvh; display: grid; place-items: center; padding: 16px; }
+  .auth > div { width: min(360px, 100%); }
+  .auth label { display: block; color: var(--muted); font-size: 14px; }
+  .auth input { display: block; width: 100%; margin: 6px 0 24px; padding: 6px 0; font: 500 28px/1.2 var(--font);
+    color: var(--fg); background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+  .auth input:focus { outline: none; border-bottom-color: var(--fg); }
+  .auth .row { display: flex; align-items: center; gap: 16px; }
+  .auth .row a { color: var(--muted); font-size: 14px; }
+  #login-title { font: 500 28px/1.2 var(--font); margin: 0 0 24px; }
+  .err { color: var(--err); font-size: 14px; min-height: 1.5em; margin: 16px 0 0; }
+
+  /* Signed in: a thin bar, the browser gets the rest. */
+  #dash { height: 100dvh; display: flex; flex-direction: column; }
+  .bar { display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 6px 0 14px; border-bottom: 1px solid var(--line); }
+  .bar #who { flex: 1; color: var(--muted); font-size: 13px; }
+  .bar button { border-color: transparent; padding: 7px 10px; font-size: 13px; color: var(--muted); }
+  .bar button:hover { color: var(--fg); }
+  .viewer { flex: 1; width: 100%; border: 0; background: var(--bg); display: block; }
+
+  dialog { width: min(480px, calc(100% - 32px)); background: var(--bg); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 24px; }
+  dialog::backdrop { background: rgb(0 0 0 / .7); }
+  dialog ol { margin: 0 0 20px; padding-left: 20px; }
+  dialog li { margin-bottom: 10px; }
+  dialog li::marker { color: var(--muted); }
+  pre { white-space: pre-wrap; word-break: break-all; margin: 6px 0 0; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 6px; color: var(--muted); }
+  .secret { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 20px; }
+  .secret .mono { flex: 1; word-break: break-all; padding: 9px 12px; border: 1px solid var(--fg); border-radius: 6px; }
+  dialog form { text-align: right; }
 </style>
 </head>
 <body>
 
-<section id="auth" class="auth" hidden>
+<section id="auth" class="auth" hidden><div>
   <form id="f-signup" hidden>
-    <label for="su-name">Username</label>
-    <input id="su-name" autocomplete="username" pattern="[a-z0-9][a-z0-9-]{1,28}[a-z0-9]" title="3-30 characters: a-z, 0-9, dashes" required>
-    <button>Sign up</button> <a href="/">Sign in</a>
+    <label for="su-name">Pick a username</label>
+    <input id="su-name" autocomplete="username" autocapitalize="none" spellcheck="false" pattern="[a-z0-9][a-z0-9\-]{1,28}[a-z0-9]" title="3-30 characters: a-z, 0-9, dashes" required>
+    <div class="row"><button class="primary">Sign up</button><a href="/">I have an account</a></div>
   </form>
   <form id="f-find" hidden>
-    <label for="find-name">Username</label><input id="find-name" autocomplete="username" required>
-    <button>Sign in</button> <a href="/signup">Sign up</a>
+    <label for="find-name">Username</label>
+    <input id="find-name" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    <div class="row"><button class="primary">Sign in</button><a href="/signup">Create an account</a></div>
   </form>
   <form id="f-login" hidden>
-    <p class="mono" id="login-title"></p>
-    <button>Email me a code</button>
+    <p id="login-title"></p>
+    <div class="row"><button class="primary">Email me a code</button><a href="/">Not you?</a></div>
   </form>
-  <p id="nouser" hidden><span id="nouser-name" class="mono"></span> doesn't exist. <a href="/signup">Sign up</a></p>
-  <p class="err" id="auth-err"></p>
-</section>
+  <p id="nouser" hidden><span id="nouser-name"></span> doesn't exist yet. <a href="/signup">Create it</a></p>
+  <p class="err" id="auth-err" role="alert"></p>
+</div></section>
 
 <main id="dash" hidden>
-  <div class="row">
-    <span id="who" class="mono grow"></span>
+  <div class="bar">
+    <span id="who"></span>
     <button id="agent-make">Generate link</button>
     <button id="guide">Guide</button>
     <button id="logout">Sign out</button>
   </div>
-  <iframe id="viewer" class="viewer" title="Cloud browser"></iframe>
+  <iframe id="viewer" class="viewer" title="Your cloud browser"></iframe>
 </main>
 
 <dialog id="guide-dlg">
-  <div id="agent-new" hidden>
-    <div class="secret mono" id="agent-url"></div>
+  <div id="agent-new" hidden class="secret">
+    <span class="mono" id="agent-url"></span>
     <button id="copy">Copy</button>
   </div>
-  <p><b>1.</b> Sign in to your sites in the browser.</p>
-  <p><b>2.</b> Generate link (a new one revokes the old).</p>
-  <p><b>3.</b> claude.ai: Settings → Connectors → Add custom connector → paste it.<br>
-     Claude Code:</p>
-  <pre id="agent-cli">claude mcp add --transport http anywr &lt;link&gt;</pre>
+  <ol>
+    <li>Sign in to your sites in the browser.</li>
+    <li>Generate a link. A new one replaces the old.</li>
+    <li>In claude.ai, go to Settings, then Connectors, then Add custom connector, and paste the link. In Claude Code:
+      <pre id="agent-cli">claude mcp add --transport http anywr &lt;link&gt;</pre></li>
+  </ol>
   <form method="dialog"><button>Close</button></form>
 </dialog>
 
@@ -94,7 +128,7 @@ $("guide").onclick = () => $("guide-dlg").showModal();
 
 function openViewer() {
   // KasmVNC web client. /view/* is authorised by this session cookie; Caddy picks your container.
-  $("viewer").src = "/view/index.html?path=view/websockify&autoconnect=1&resize=scale&reconnect=1";
+  $("viewer").src = "/view/index.html?path=view/websockify&autoconnect=1&resize=remote&reconnect=1";
   clearInterval(beat);
   beat = setInterval(() => api("/api/browser/touch", { method: "POST" }).catch(() => {}), 60000);
 }

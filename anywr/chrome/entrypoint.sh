@@ -19,7 +19,7 @@ google-chrome-stable \
   --disable-backgrounding-occluded-windows --disable-renderer-backgrounding \
   --disable-background-timer-throttling \
   --no-first-run --no-default-browser-check \
-  --window-position=0,0 --window-size=1440,860 \
+  --start-maximized \
   about:blank &
 CHROME=$!
 socat TCP-LISTEN:9223,fork,reuseaddr TCP:127.0.0.1:9222 &

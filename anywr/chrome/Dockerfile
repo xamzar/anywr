@@ -17,6 +17,12 @@ COPY policy.json /etc/opt/chrome/policies/managed/anywr.json
 COPY entrypoint.sh /entrypoint.sh
 
 RUN useradd -m -u 1000 anywr && mkdir -p /profile && chown anywr:anywr /profile
+# Fluxbox only keeps Chrome maximized, borderless, with no toolbar, so the viewer's
+# size (KasmVNC resize=remote) becomes Chrome's size.
+RUN mkdir -p /home/anywr/.fluxbox \
+ && printf 'session.screen0.toolbar.visible: false\n' > /home/anywr/.fluxbox/init \
+ && printf '[app] (.*)\n  [Maximized] {yes}\n  [Deco] {NONE}\n[end]\n' > /home/anywr/.fluxbox/apps \
+ && chown -R anywr:anywr /home/anywr/.fluxbox
 USER anywr
 ENV DISPLAY=:99 TZ=UTC
 ENTRYPOINT ["tini", "--", "/entrypoint.sh"]

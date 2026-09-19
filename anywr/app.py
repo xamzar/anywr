@@ -527,7 +527,8 @@ def oops(msg, status=400, retry=None):
 (it opens a new tab), then <a href="{retry}">try again</a> and enter your own email.
 A private window works too.</p>"""
     return HTMLResponse(f"""<!doctype html><meta name=viewport content="width=device-width">
-<title>anywr</title><body style="font:16px system-ui;max-width:480px;margin:15vh auto;padding:0 16px;line-height:1.5">
+<title>anywr</title><style>:root{{color-scheme:dark}}a{{color:#ededed}}</style>
+<body style="font:15px/1.5 system-ui,sans-serif;max-width:480px;margin:15vh auto;padding:0 16px;background:#000;color:#ededed">
 <h1 style="font-size:22px">Couldn't sign you in</h1><p>{msg}</p>{switch}<p><a href="/">anywr.me</a></p>""", status)
 
 
