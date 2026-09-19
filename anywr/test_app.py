@@ -88,7 +88,8 @@ with new_client() as c:
     c2 = new_client()
     assert c2.post("/api/login", json={"username": "bee", "invite": code}).status_code == 400
     code2 = c.post("/api/invites").json()["code"]
-    assert sign_in(c2, "admin@example.com", username="bee", invite=code2).status_code == 400  # email taken
+    r = sign_in(c2, "admin@example.com", username="bee", invite=code2)                      # email taken
+    assert r.status_code == 400 and "/cdn-cgi/access/logout" in r.text and f"invite={code2}" in r.text
     assert sign_in(c2, "b@x.io", username="boss", invite=code2).status_code == 400            # name taken
     r = sign_in(c2, "b@x.io", username="bee", invite=code2)
     assert r.status_code == 303 and r.headers["location"] == "/bee"

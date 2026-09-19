@@ -501,10 +501,17 @@ def read_ticket(t):
     return d if d.get("x", 0) > now() else None
 
 
-def oops(msg, status=400):
+def oops(msg, status=400, retry=None):
+    # Cloudflare Access keeps one login per browser across every Access app, and
+    # hands out that identity without asking. When it's the wrong person, the
+    # only way to get the code prompt again is to sign this browser out of Access.
+    switch = "" if not retry else f"""<p><b>Not you?</b> Cloudflare remembered an earlier sign-in on this browser.
+<a href="{AUTH_URL}/cdn-cgi/access/logout" target="_blank" rel="noopener">Sign out of Cloudflare</a>
+(it opens a new tab), then <a href="{retry}">try again</a> and enter your own email.
+A private window works too.</p>"""
     return HTMLResponse(f"""<!doctype html><meta name=viewport content="width=device-width">
-<title>anywr</title><body style="font:16px system-ui;max-width:480px;margin:15vh auto;padding:0 16px">
-<h1 style="font-size:22px">Couldn't sign you in</h1><p>{msg}</p><p><a href="/">anywr.me</a></p>""", status)
+<title>anywr</title><body style="font:16px system-ui;max-width:480px;margin:15vh auto;padding:0 16px;line-height:1.5">
+<h1 style="font-size:22px">Couldn't sign you in</h1><p>{msg}</p>{switch}<p><a href="/">anywr.me</a></p>""", status)
 
 
 @api.get("/auth/callback", include_in_schema=False)
@@ -522,12 +529,14 @@ async def login_finish(request: Request, t: str = ""):
     if "login" in intent:
         u = one("SELECT id, username, email FROM users WHERE id=?", (intent["login"],))
         if not u or u["email"].lower() != email:
-            return oops(f"You verified <b>{email}</b>, but that isn't the email for this page.", 403)
+            return oops(f"You verified <b>{email}</b>, but that isn't the email for this page.", 403,
+                        retry=f"/{u['username']}" if u else None)
         uid, username = u["id"], u["username"]
     else:
         mine = one("SELECT username FROM users WHERE email=?", (email,))
         if mine:
-            return oops(f"{email} already has a browser: <a href=\"/{mine['username']}\">anywr.me/{mine['username']}</a>")
+            return oops(f"<b>{email}</b> already has a browser: <a href=\"/{mine['username']}\">anywr.me/{mine['username']}</a>",
+                        retry=f"/signup?invite={intent['invite']}")
         username = intent["signup"]
         try:
             with conn() as c:  # user + invite claim commit together or not at all
