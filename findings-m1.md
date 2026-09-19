@@ -38,9 +38,11 @@ whole table.
 > public, so this is a good proxy rather than the exact number, but it is far better than
 > counting characters.
 >
-> There is a cheap win here: the column padding exists to make the digest readable
-> positionally, and it is costing real tokens to do it. Worth measuring an unpadded variant
-> before M5 builds on this format.
+> **Acted on.** The column padding was costing **16.8%** of the digest's tokens on a real
+> Banner page — runs of spaces do not merge into their neighbours, so every pad is its own
+> token — and `[n] role name` is unambiguous without them. Dropping it puts the kernel at
+> ~1,823 tokens for this task and the ratio back to **~9.2×**, this time for a measured
+> reason rather than an estimator's bias.
 
 Both surfaces finished the task. The kernel returned eleven graded courses with codes,
 titles, credits and grades.

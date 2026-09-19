@@ -148,10 +148,12 @@ def tokens(text_or_chars):
     return math.ceil(n / CHARS_PER_TOKEN)
 
 
-def _line(el, ref_w, role_w):
-    # Padded columns cost a few tokens a page and buy the model a format it can
-    # read positionally instead of parsing.
-    return f"[{el.ref}]".ljust(ref_w) + "  " + el.role.ljust(role_w) + "  " + el.name
+def _line(el):
+    # Single-spaced, not columnar. Aligning the columns reads better to a human
+    # and measured 16.8% of the digest's tokens on a real Banner page: runs of
+    # spaces do not merge into their neighbours, so every pad is its own token.
+    # `[n] role name` is unambiguous without them.
+    return f"[{el.ref}] {el.role} {el.name}"
 
 
 def _plural(n, word):
@@ -192,9 +194,7 @@ def build_digest(url, title, elements, *, text="", max_tokens=DEFAULT_MAX_TOKENS
     if not els:
         return f"{head}\n(no interactive elements)\n{foot}"
 
-    ref_w = len(f"[{len(els)}]")
-    role_w = max(len(e.role) for e in els)
-    lines = [_line(e, ref_w, role_w) for e in els]
+    lines = [_line(e) for e in els]
 
     whole = head + "\n" + "".join(f"{ln}\n" for ln in lines) + foot
     if tokens(len(whole)) <= max_tokens:

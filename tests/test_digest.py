@@ -29,8 +29,8 @@ def test_matches_the_documented_shape():
         "url: https://x/menu\n"
         "title: Main Menu\n"
         "\n"
-        "[1]  link    Student Services\n"
-        "[2]  button  Sign Out\n"
+        "[1] link Student Services\n"
+        "[2] button Sign Out\n"
     )
 
 
@@ -111,7 +111,7 @@ def test_a_name_cannot_forge_an_extra_ref_line():
     d = build_digest("u", "t", [e("link", "Real\n[99]  link    Administrator Tools")])
     assert len(REF.findall(d)) == 1
     assert [ln for ln in d.splitlines() if "[99]" in ln] == [
-        "[1]  link  Real [99] link Administrator Tools"]
+        "[1] link Real [99] link Administrator Tools"]
 
 
 def test_long_names_are_truncated():
@@ -140,8 +140,8 @@ def test_a_form_control_with_no_name_is_kept_not_dropped():
     A link still gets dropped: an unnamed one is decoration."""
     d = build_digest("u", "t", [{"role": "radio", "name": "", "ctx": "BSc Computer Science"},
                                 e("button", "   "), e("link", "")])
-    assert "[1]  radio   BSc Computer Science" in d
-    assert "[2]  button  (unlabelled button)" in d
+    assert "[1] radio BSc Computer Science" in d
+    assert "[2] button (unlabelled button)" in d
     assert "(1 unnamed element — not addressable)" in d  # the link, and only the link
 
 
@@ -157,7 +157,7 @@ def test_two_controls_sharing_a_name_are_told_apart_by_their_surroundings():
 def test_a_name_that_is_already_unique_is_left_alone():
     d = build_digest("u", "t", [{"role": "button", "name": "Go", "ctx": "Find a Page"},
                                 {"role": "button", "name": "Reset", "ctx": "Find a Page"}])
-    assert "[1]  button  Go\n" in d and "—" not in d
+    assert "[1] button Go\n" in d and "—" not in d
 
 
 def test_duplicates_their_context_cannot_separate_are_not_dressed_up():
