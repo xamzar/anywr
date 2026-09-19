@@ -171,7 +171,7 @@ discovery and on repair after a site changes.
 
 ### Adapters are declarative
 
-An adapter is YAML in `/data/adapters/<name>.yaml` — **data a fixed interpreter walks, never
+An adapter is YAML in `/state/adapters/<name>.yaml` — **data a fixed interpreter walks, never
 code that runs.** That is what makes the guardrail structural instead of a boundary to
 defend.
 
@@ -188,7 +188,8 @@ extract:
 returns: [{course: str, title: str, grade: str}]
 ```
 
-Step verbs are a **closed set**: `click`, `fill`, `select`, `read`, `back`, `wait`. There is
+Step verbs are a **closed set**: `click`, `fill`, `select`, `read`, `wait`. (Not `back` — it
+was deferred in M1 and never built.) There is
 no verb for running code, reading a file, or making a network request, so there is nothing
 for a bad adapter to reach for.
 
@@ -196,7 +197,9 @@ for a bad adapter to reach for.
 
 1. **Reserved names.** `BASE_TOOL_NAMES` is frozen in code. Any adapter named after a base
    tool is refused. No shadowing of `view`, `click`, `fill`, `export_adapter`, or any other.
-2. **Name validation.** `^[a-z][a-z0-9_]{2,40}$`.
+2. **Name validation.** `^[a-z][a-z0-9_]{2,40}\Z` — `\Z`, not `$`: in Python `$` also matches
+   before a trailing newline, so `"aims_grades\n"` would pass and become a filename with a
+   newline in it.
 3. **Path confinement.** Resolve with `os.path.realpath` and compare against the adapters
    directory. Outside, or a symlink — refused.
 4. **Schema validation before write.** Unknown keys are an **error**, not ignored. Silently
@@ -206,7 +209,7 @@ for a bad adapter to reach for.
 6. **Read-only code mount.** `./src:/app/src:ro` is already in `docker-compose.yml`. Even a
    bug that escapes every check above cannot reach the base tools, because the filesystem
    refuses. This is the wall; rules 1–5 are the fence.
-7. **Audit log.** Every write appends to `/data/adapters/.audit.jsonl` — timestamp, name,
+7. **Audit log.** Every write appends to `/state/adapters/.audit.jsonl` — timestamp, name,
    spec hash.
 
 A file that fails validation at startup is skipped with a loud log line. One bad adapter must
