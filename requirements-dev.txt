@@ -1,0 +1,13 @@
+# Running the suite on a laptop rather than inside the containers.
+#
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements-dev.txt
+#   .venv/bin/playwright install chromium     # kernel tests drive a real browser
+#   .venv/bin/python -m pytest -q
+#
+# Pinned to what the images already use: docker/mcp.Dockerfile for fastmcp and
+# playwright, docker/Dockerfile for the rest.
+pytest==8.3.3
+pyyaml==6.0.2
+playwright==1.55.0
+fastmcp==3.4.5

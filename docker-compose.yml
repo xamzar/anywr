@@ -47,6 +47,42 @@ services:
       - ./src:/app/src:ro
       - ./config:/app/config:ro
 
+  # M1 digest kernel: view / click / fill / select / session_status over one
+  # browser. Deliberately NOT
+  # network_mode: service:soak -- it talks to work over the default network, so
+  # nothing here can reach the experiment's Chrome. No /data mount either: with
+  # no soak.db in reach it cannot write AGENT_ACTION even by accident.
+  # No published port; it is spoken to over `docker compose exec` on stdio.
+  kernel:
+    build: { context: ., dockerfile: docker/mcp.Dockerfile }
+    restart: unless-stopped
+    env_file: config/.env            # TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
+    environment:
+      KERNEL_CDP: "work:9223"
+      KERNEL_STATE_FILE: "/state/handoff.json"
+      KERNEL_VIEWER_URL: "https://mcp.xmzr.dev/ws/live/"
+    command: ["python", "-m", "kernel.server"]
+    volumes:
+      - ./src:/app/src:ro
+      - ./state:/state               # the handoff record, shared with `control`
+
+  # The Done button. Its own process because the MCP server runs on stdio and a
+  # `docker compose exec` pipe cannot receive an HTTP request. No browser, no
+  # /data, no CDP: it reads and writes one file and serves one page.
+  control:
+    build: { context: ., dockerfile: docker/mcp.Dockerfile }
+    restart: unless-stopped
+    environment:
+      KERNEL_STATE_FILE: "/state/handoff.json"
+      KERNEL_CONTROL_PORT: "8787"
+      # Resolved by the browser against mcp.xmzr.dev, not inside the container,
+      # so it carries the gateway's /ws prefix.
+      KERNEL_NOVNC_URL: "/ws/view/work/vnc.html"
+    command: ["python", "-m", "kernel.control"]
+    volumes:
+      - ./src:/app/src:ro
+      - ./state:/state
+
   # Front door for mcp-hub's Caddy (mcp.xmzr.dev/ws/*). Bound to the VPC
   # address only; no firewall rule opens 8090 to the internet.
   gateway:

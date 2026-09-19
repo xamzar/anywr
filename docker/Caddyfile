@@ -13,6 +13,14 @@
 		handle_path /view/work/* {
 			reverse_proxy work:6080
 		}
+		# The viewer with the Done button. handle_path strips /live, so control
+		# sees /, /handoff and /handoff/done. The redirect matters: the page
+		# resolves its API calls against its own path, and /live without the
+		# trailing slash would aim them one level too high.
+		redir /live /live/
+		handle_path /live/* {
+			reverse_proxy control:8787
+		}
 		# The MCP server shares soak's network namespace, so it answers on soak:8000.
 		handle /mcp* {
 			reverse_proxy soak:8000
