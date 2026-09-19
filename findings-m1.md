@@ -16,20 +16,42 @@ through the stock Playwright surface, same pages, same session, minutes apart.
 | click Grade Display | 313 | 1,878 |
 | click Go (submit programme) | 300 | 4,577 |
 | read(contains='CS') | 150 | — |
-| **Total** | **~1,753 tok** | **~16,087 tok** | 
+| **Total (chars)** | 7,012 | 64,348 |
+| **Total (tokens)** | **~2,191** | **~16,757** |
 
-**9.2× less context for the same completed task.** Per page the range was 6.9×–15.3×; the
-ratio is widest on the grades page itself, where the stock snapshot carries the whole table.
+**7.6× less context for the same completed task.** Per page the char ratio ranged
+6.9×–15.3×; it is widest on the grades page itself, where the stock snapshot carries the
+whole table.
+
+> **Correction, same day.** This first read **9.2×**, from estimating 4 characters per token
+> for both surfaces. Measured with a real tokenizer, the two surfaces do not tokenize alike:
+>
+> | | chars/token |
+> |---|---:|
+> | kernel digest | **3.20** |
+> | stock aria snapshot | **3.84** |
+>
+> The digest's `[12]  link    Name` format — brackets, digits and runs of padding spaces —
+> tokenizes measurably worse than the snapshot's prose-shaped text, so the flat estimate
+> understated the kernel by 25% and stock by only 4%. The honest figure is **7.6×**, and the
+> original was overstated by 20%. Measured with `o200k_base`; Claude's tokenizer is not
+> public, so this is a good proxy rather than the exact number, but it is far better than
+> counting characters.
+>
+> There is a cheap win here: the column padding exists to make the digest readable
+> positionally, and it is costing real tokens to do it. Worth measuring an unpadded variant
+> before M5 builds on this format.
 
 Both surfaces finished the task. The kernel returned eleven graded courses with codes,
 titles, credits and grades.
 
 ## How to read this, honestly
 
-- **Tokens are estimated at 4 characters each, not counted with a real tokenizer.** The
-  ratio is robust — an order of magnitude does not come from an estimator being 15% off —
-  but the absolute figures are approximate. A real count is worth doing before this number
-  goes in a deck.
+- **Tokens are counted with `o200k_base`, not Claude's tokenizer** (which is not public), so
+  treat these as close rather than exact. The first version of this document estimated 4
+  chars/token and got 9.2×; see the correction above. The lesson is that an estimator that
+  looks harmless can be biased *between* the two things being compared, which is the one
+  place it does real damage.
 - **The control is `aria_snapshot()` as `src/mcp_server.py` calls it**, capped at 40,000
   characters. That is the surface we would otherwise have shipped, and it is the right
   comparison for *our* decision. It is not identical to upstream Playwright MCP, so this is
@@ -62,11 +84,12 @@ argument for running against a real portal early.
    submit the programme form. Where a name repeats, the surrounding text is appended, and
    only there: `Go — Find a Page` against `Go — BSCCCU4 (CSC1) - …`.
 
-## Scope: the kernel is six tools, not three
+## Scope: the kernel is six tools at the time of this measurement, not three
 
 The timeline specified `view` / `click` / `fill`. Three more were added, each because the
 task could not complete without it. A fair reading of the number above must account for
-this: it was measured against a six-tool kernel.
+this: it was measured against a six-tool kernel. (M2 later added a seventh, `handoff`,
+which this run did not use.)
 
 - **`select(ref, option)`** — added for a term dropdown that, on this page, turned out not to
   exist. Banner uses a radio here. It is tested but was not exercised by this run.
@@ -103,16 +126,16 @@ model treats it as "not confirmed" rather than "fine".
 
 ## What M1 did not do
 
-- No real-tokenizer count.
 - `select()` unexercised against a live dropdown.
 - Not reachable through the gateway; spoken to over `docker compose exec` on stdio.
 - Never pointed at Claude Desktop end to end, which is the other half of the timeline's
   "done when".
-- 144 tests, all against local fixtures except this run.
+- `handoff()` did not exist yet; this run predates M2.
+- 144 tests at the time of the run, all against local fixtures except this run itself.
 
 ## Recommendation
 
-Proceed to M2. The thesis is not in doubt at 9.2×, and the remaining M1 gaps are reporting
+Proceed to M2. The thesis is not in doubt at 7.6×, and the remaining M1 gaps are reporting
 polish rather than open questions. The `session_status` result argues for bringing
 `handoff()` forward: a dead session is now *detectable*, and the only thing to do about it is
 hand control to the human — which is M2 and is the demo anyway.
