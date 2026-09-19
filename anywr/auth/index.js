@@ -21,9 +21,36 @@ async function accessEmail(req, env) {
   return c.email || null;
 }
 
+// /start (an Access bypass path): app.py already began the Access login and
+// submitted the page owner's email. Adopt that login's app-session cookie and ask
+// only for the code, posting it where Access's own code page would.
+async function start(url, env) {
+  const [body, sig] = (url.searchParams.get("b") || "").split(".");
+  let d;
+  try {
+    const key = await crypto.subtle.importKey("raw", enc(env.SSO_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    if (!(await crypto.subtle.verify("HMAC", key, unb64url(sig), enc(body)))) throw 0;
+    d = JSON.parse(new TextDecoder().decode(unb64url(body)));
+  } catch { d = null; }
+  if (!d || d.x < Date.now() / 1000 || !/^[\w-]+$/.test(d.a) || !/^[\w-]+$/.test(d.n))
+    return new Response("Start signing in from anywr.me.", { status: 400 });
+  const html = `<!doctype html><meta name=viewport content="width=device-width"><title>anywr</title>
+<body style="font:15px/1.5 system-ui,sans-serif;max-width:320px;margin:15vh auto;padding:0 16px">
+<form method=post action="${env.TEAM}/cdn-cgi/access/callback"><label for=code>Code from your email</label>
+<input id=code name=code inputmode=numeric pattern="\\d{6}" autocomplete=one-time-code required autofocus
+ style="font:inherit;padding:6px 10px;width:100%;box-sizing:border-box;margin:4px 0 10px">
+<input type=hidden name=nonce value="${d.n}"><button style="font:inherit;padding:6px 10px">Sign in</button></form>`;
+  return new Response(html, { headers: {
+    "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer",
+    "set-cookie": `CF_AppSession=${d.a}; Path=/; Secure; HttpOnly; Max-Age=86400`,
+  } });
+}
+
 export default {
   async fetch(req, env) {
-    const state = new URL(req.url).searchParams.get("state") || "";
+    const url = new URL(req.url);
+    if (url.pathname === "/start") return start(url, env);
+    const state = url.searchParams.get("state") || "";
     if (!/^[A-Za-z0-9_-]{20,64}$/.test(state)) return new Response("Start signing in from anywr.me.", { status: 400 });
     const email = await accessEmail(req, env);
     if (!email) return new Response("Not verified by Cloudflare Access.", { status: 403 });

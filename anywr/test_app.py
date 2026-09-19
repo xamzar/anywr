@@ -36,6 +36,14 @@ async def fake_destroy(uid):
     pass
 
 
+prefilled = []
+
+
+async def fake_prefill(st, email):  # the real one talks to Cloudflare; None = plain Access page
+    return prefilled.pop() if prefilled else None
+
+
+A.prefill = fake_prefill
 A.ensure_running = fake_ensure
 A.state = fake_state
 A.destroy = fake_destroy
@@ -97,6 +105,9 @@ with new_client() as c:
     assert sign_in(c3, "b@x.io", username="boss").status_code == 403
     assert sign_in(c3, "admin@example.com", username="boss").status_code == 303
     assert c3.post("/api/login", json={"username": "ghost"}).status_code == 404
+    prefilled.append("https://auth/start?b=x")  # owner's email already submitted: straight to the code box
+    assert c3.post("/api/login", json={"username": "boss"}).json()["url"] == "https://auth/start?b=x"
+    assert c3.post("/api/login", json={"username": "boss"}).status_code == 429   # one email a minute
 
     # tickets: forged, expired, replayed, or from another browser are all refused
     st = c3.post("/api/login", json={"username": "bee"}).json()["url"].split("state=")[1]

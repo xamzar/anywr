@@ -12,7 +12,10 @@ kernel) is the obvious next swap.
 ```
 browser --> anywr.me (Namecheap DNS, A -> VM 34.92.189.68) --> Caddy --> api (app.py)
                                                                   \--> /view/* -> anywr-u<id>:6080
-sign-in:  anywr.me/<user> -> anywr-auth.xmzr.dev (Cloudflare Access one-time PIN, Worker in auth/)
+sign-in:  anywr.me/<user> -> api starts the Access login and submits the owner's email
+          -> anywr-auth.xmzr.dev/start (Access bypass app `anywr-start`: adopts that login's
+             CF_AppSession, asks only for the code) -> Access callback -> Worker
+          (falls back to the plain Access page, where you type the email, if that fails)
           -> anywr.me/auth/callback?t=<HMAC ticket>  -> session cookie
 agent --> anywr.me/mcp/<token> -> app.py -> Playwright over CDP -> anywr-u<id>:9223
 ```

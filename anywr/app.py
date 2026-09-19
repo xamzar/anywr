@@ -32,6 +32,7 @@ import socket
 import sqlite3
 import time
 import urllib.request
+from urllib.parse import parse_qs, urlsplit
 from contextlib import asynccontextmanager
 
 import httpx
@@ -451,9 +452,11 @@ async def login_start(b: Start, resp: Response):
     proven, and send the browser to Cloudflare Access to prove it."""
     username = b.username.strip().lower()
     if not b.signup:
-        u = one("SELECT id FROM users WHERE username=?", (username,))
+        u = one("SELECT id, email FROM users WHERE username=?", (username,))
         if not u:
             raise HTTPException(404, f"anywr.me/{username} does not exist")
+        if now() - _mailed.get(u["id"], 0) < 60:
+            raise HTTPException(429, "a code was just emailed; wait a minute to send another")
         intent = {"login": u["id"]}
     else:
         if not USERNAME_RE.fullmatch(username) or username in RESERVED:
@@ -468,7 +471,38 @@ async def login_start(b: Start, resp: Response):
     q("INSERT INTO logins VALUES (?,?,?)", (h(st), json.dumps(intent), now() + 600))
     # The ticket must come back to the same browser that started the login.
     resp.set_cookie(STATE_COOKIE, st, max_age=600, httponly=True, secure=True, samesite="lax", path="/auth")
+    if "login" in intent:
+        url = await prefill(st, u["email"])
+        if url:
+            _mailed[u["id"]] = now()
+            return {"url": url}
     return {"url": f"{AUTH_URL}/?state={st}"}
+
+
+_mailed: dict[int, int] = {}  # ponytail: in-memory, resets on restart; fine for one api process
+
+
+async def prefill(st, email):
+    """Skip Access's "enter your email" step for a known page: start the Access
+    login from here, submit the owner's email, and hand the browser to the auth
+    Worker's /start, which sets the matching Access app-session cookie and shows a
+    code box that never displays the address. None = fall back to the Access page."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(f"{AUTH_URL}/?state={st}")
+            login = r.headers["location"]
+            if "/cdn-cgi/access/login/" not in login:
+                return None
+            r2 = await c.post(login.replace("/cdn-cgi/access/login/", "/cdn-cgi/access/verify-code/", 1),
+                              data={"email": email})
+            nonce = parse_qs(urlsplit(r2.headers["location"]).query)["nonce"][0]
+            blob = {"a": r.cookies["CF_AppSession"], "n": nonce, "x": now() + 600}
+    except (httpx.HTTPError, KeyError, IndexError) as e:
+        log.warning("Access prefill failed, falling back: %r", e)
+        return None
+    body = base64.urlsafe_b64encode(json.dumps(blob).encode()).rstrip(b"=")
+    sig = base64.urlsafe_b64encode(hmac.digest(SSO_SECRET, body, "sha256")).rstrip(b"=")
+    return f"{AUTH_URL}/start?b={body.decode()}.{sig.decode()}"
 
 
 def read_ticket(t):
