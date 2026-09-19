@@ -452,10 +452,6 @@ def page(file):
 
 
 @api.get("/", include_in_schema=False)
-async def landing():
-    return page("index.html")
-
-
 @api.get("/signup", include_in_schema=False)
 @api.get("/login", include_in_schema=False)
 async def signup_page():

@@ -5,7 +5,7 @@ The productised (M3/M4) side of this repo, on its own VM. It never touches the
 soak VM. Its MCP still uses raw Playwright tools; `src/kernel/` (the digest
 kernel) is the obvious next swap.
 
-- **Site:** https://anywr.me — landing; `/signup` (invite code + username); `/<username>` (sign-in + dashboard)
+- **Site:** https://anywr.me — sign-in; `/signup` (invite code + username); `/<username>` (sign-in + dashboard)
 - **MCP:** `https://anywr.me/mcp/<token>`, one per user, minted on their page
 - **Viewer:** `https://anywr.me/<username>#browser` (KasmVNC at `/view/*`, authorised by the session cookie)
 
@@ -22,7 +22,7 @@ agent --> anywr.me/mcp/<token> -> app.py -> Playwright over CDP -> anywr-u<id>:9
 | | |
 |---|---|
 | `app.py` | Everything server-side: users, invites, sessions, agent tokens, the MCP tools, and the per-user containers (Docker Engine API over the socket). |
-| `static/` | `index.html` landing; `app.html` sign-up, sign-in and dashboard (routes by path). |
+| `static/` | `app.html` sign-up, sign-in and dashboard (routes by path). |
 | `chrome/` | The per-user browser image (`anywr-chrome`): Chrome on KasmVNC (X server + web viewer on :6080), CDP re-exported on :9223. |
 | `auth/` | Cloudflare Worker behind the Access app. Verifies the Access JWT and returns the email as a 2-minute HMAC ticket. |
 | `fw.sh` + `anywr-fw.service` | Browsers (172.31.0.0/16) can't reach private ranges or the metadata server. |
