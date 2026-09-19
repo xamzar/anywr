@@ -1,6 +1,6 @@
 """anywr: a cloud Chrome per user that stays logged in, driven by the user's agent over MCP.
 
-One process: accounts (invite-only sign-up), the landing page, each user's page at
+One process: accounts (open sign-up up to MAX_USERS), each user's page at
 anywr.me/<username>, one Docker container
 per user (started on demand, stopped when idle, profile kept in a volume), and
 the MCP server at /mcp/<token>.
@@ -18,7 +18,6 @@ The host firewall (fw.sh) stops the browsers reaching private ranges and the
 GCE metadata server.
 
     python app.py            serve
-    python app.py invite     mint an invite code
 """
 import asyncio
 import base64
@@ -31,7 +30,6 @@ import re
 import secrets
 import socket
 import sqlite3
-import sys
 import time
 import urllib.request
 from contextlib import asynccontextmanager
@@ -53,10 +51,10 @@ BASE = os.environ.get("BASE_URL", "https://anywr.me")
 AUTH_URL = os.environ.get("AUTH_URL", "https://anywr-auth.xmzr.dev")
 SSO_SECRET = os.environ.get("SSO_SECRET", "").encode()   # shared with the auth Worker
 DB_PATH = os.environ.get("DB", "/data/anywr.db")
-ADMINS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
 IMAGE = os.environ.get("CHROME_IMAGE", "anywr-chrome")
 SELF = os.environ.get("SELF_CONTAINER", "anywr-api")      # attached to every user network
 CADDY = os.environ.get("CADDY_CONTAINER", "anywr-caddy")  # likewise, for the viewer
+MAX_USERS = int(os.environ.get("MAX_USERS", "45"))         # Access free plan: 50 seats
 MAX_RUNNING = int(os.environ.get("MAX_RUNNING", "6"))     # ~1 GB each on an 8 GB box
 IDLE = int(os.environ.get("IDLE_MINUTES", "30")) * 60
 SESSION_TTL = 30 * 86400
@@ -87,9 +85,6 @@ CREATE TABLE IF NOT EXISTS agent_tokens (
 -- A login in flight: what to do once Access has verified an email.
 CREATE TABLE IF NOT EXISTS logins (
     state_hash TEXT PRIMARY KEY, intent TEXT NOT NULL, expires_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS invites (
-    code TEXT PRIMARY KEY, created_at INTEGER NOT NULL,
-    used_by INTEGER REFERENCES users(id) ON DELETE SET NULL, used_at INTEGER);
 """
 
 
@@ -155,16 +150,8 @@ def require_user(request: Request):
     return u
 
 
-def require_admin(u=Depends(require_user)):
-    if u["email"].lower() not in ADMINS:
-        raise HTTPException(403, "admins only")
-    return u
-
-
-def mint_invite():
-    code = secrets.token_urlsafe(9)
-    q("INSERT INTO invites (code, created_at) VALUES (?,?)", (code, now()))
-    return code
+def full():
+    return one("SELECT COUNT(*) n FROM users")["n"] >= MAX_USERS
 
 
 # --------------------------------------------------------------------------
@@ -437,7 +424,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 class Start(BaseModel):
     username: str
-    invite: str | None = None   # present = sign-up
+    signup: bool = False
 
 
 STATE_COOKIE = "awst"
@@ -463,7 +450,7 @@ async def login_start(b: Start, resp: Response):
     """Begin a sign-in (or sign-up): remember what to do once the email is
     proven, and send the browser to Cloudflare Access to prove it."""
     username = b.username.strip().lower()
-    if b.invite is None:
+    if not b.signup:
         u = one("SELECT id FROM users WHERE username=?", (username,))
         if not u:
             raise HTTPException(404, f"anywr.me/{username} does not exist")
@@ -473,9 +460,9 @@ async def login_start(b: Start, resp: Response):
             raise HTTPException(400, "usernames are 3-30 characters: a-z, 0-9 and dashes")
         if one("SELECT id FROM users WHERE username=?", (username,)):
             raise HTTPException(400, "that username is taken")
-        if not one("SELECT code FROM invites WHERE code=? AND used_at IS NULL", (b.invite.strip(),)):
-            raise HTTPException(400, "that invite code is invalid or already used")
-        intent = {"signup": username, "invite": b.invite.strip()}
+        if full():
+            raise HTTPException(403, "sign-ups are full")
+        intent = {"signup": username}
     st = secrets.token_urlsafe(24)
     q("DELETE FROM logins WHERE expires_at<?", (now(),))
     q("INSERT INTO logins VALUES (?,?,?)", (h(st), json.dumps(intent), now() + 600))
@@ -532,17 +519,16 @@ async def login_finish(request: Request, t: str = ""):
         mine = one("SELECT username FROM users WHERE email=?", (email,))
         if mine:
             return oops(f"<b>{email}</b> already has a browser: <a href=\"/{mine['username']}\">anywr.me/{mine['username']}</a>",
-                        retry=f"/signup?invite={intent['invite']}")
+                        retry="/signup")
         username = intent["signup"]
         try:
-            with conn() as c:  # user + invite claim commit together or not at all
+            with conn() as c:  # the cap check and the insert commit together
                 c.execute("BEGIN IMMEDIATE")
+                if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] >= MAX_USERS:
+                    c.execute("ROLLBACK")
+                    return oops("Sign-ups are full.")
                 uid = c.execute("INSERT INTO users (username, email, created_at) VALUES (?,?,?)",
                                 (username, email, now())).lastrowid
-                if c.execute("UPDATE invites SET used_by=?, used_at=? WHERE code=? AND used_at IS NULL",
-                             (uid, now(), intent["invite"])).rowcount != 1:
-                    c.execute("ROLLBACK")
-                    return oops("That invite code was used by someone else in the meantime.")
                 c.execute("COMMIT")
         except sqlite3.IntegrityError:
             return oops("That username was taken in the meantime. Pick another.")
@@ -567,7 +553,7 @@ async def session(request: Request):
     if not u:
         return {"user": None}
     info = one("SELECT created_at, last_used_at FROM agent_tokens WHERE user_id=?", (u["id"],))
-    return {"user": {**u, "admin": u["email"].lower() in ADMINS},
+    return {"user": u,
             "browser": await state(u["id"]), "agent": info}
 
 
@@ -620,18 +606,6 @@ async def delete_account(b: Confirm, u=Depends(require_user)):
     await destroy(u["id"])
     q("DELETE FROM users WHERE id=?", (u["id"],))
     return {"ok": True}
-
-
-@api.get("/api/invites")
-async def invites(_=Depends(require_admin)):
-    rows, _c = q("SELECT i.code, i.created_at, i.used_at, u.username FROM invites i "
-                 "LEFT JOIN users u ON u.id=i.used_by ORDER BY i.created_at DESC")
-    return [dict(r) for r in rows]
-
-
-@api.post("/api/invites")
-async def invite_create(_=Depends(require_admin)):
-    return {"code": mint_invite()}
 
 
 @api.get("/api/user/{username}")
@@ -704,10 +678,5 @@ logging.getLogger("uvicorn.access").addFilter(RedactTokens())
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["invite"]:
-        with conn() as c:
-            c.executescript(SCHEMA)
-        print(mint_invite())
-    else:
-        import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=8000, proxy_headers=True, forwarded_allow_ips="*")
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, proxy_headers=True, forwarded_allow_ips="*")

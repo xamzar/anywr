@@ -18,7 +18,6 @@
   .viewer { width: 100%; aspect-ratio: 1440 / 900; border: 1px solid #8884; margin-top: 12px; }
   dialog { max-width: 520px; }
   pre { white-space: pre-wrap; word-break: break-all; }
-  td { padding: 2px 8px 2px 0; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -26,7 +25,6 @@
 
 <section id="auth" class="auth" hidden>
   <form id="f-signup" hidden>
-    <label for="invite">Invite code</label><input id="invite" autocomplete="off" required>
     <label for="su-name">Username</label>
     <input id="su-name" autocomplete="username" pattern="[a-z0-9][a-z0-9-]{1,28}[a-z0-9]" title="3-30 characters: a-z, 0-9, dashes" required>
     <button>Sign up</button> <a href="/">Sign in</a>
@@ -58,10 +56,6 @@
     <button id="copy">Copy</button>
   </div>
   <iframe id="viewer" class="viewer" title="Cloud browser" hidden></iframe>
-  <div id="admin" hidden>
-    <p class="row"><b class="grow">Invites</b><button id="inv-make">New invite</button></p>
-    <table class="mono"><tbody id="inv"></tbody></table>
-  </div>
 </main>
 
 <dialog id="guide-dlg">
@@ -70,10 +64,7 @@
   <p><b>3.</b> claude.ai: Settings → Connectors → Add custom connector → paste it.<br>
      Claude Code:</p>
   <pre id="agent-cli">claude mcp add --transport http anywr &lt;link&gt;</pre>
-  <form method="dialog" class="row">
-    <button class="grow" style="text-align:left;border:0;background:none;color:#dc2626" id="del" type="button">Delete account</button>
-    <button>Close</button>
-  </form>
+  <form method="dialog"><button>Close</button></form>
 </dialog>
 
 <script>
@@ -94,12 +85,10 @@ async function startLogin(body) {
   try { location.href = (await api("/api/login", { method: "POST", body: JSON.stringify(body) })).url; }
   catch (err) { fail(err); }
 }
-$("f-signup").onsubmit = (e) => { e.preventDefault(); startLogin({ username: $("su-name").value, invite: $("invite").value }); };
+$("f-signup").onsubmit = (e) => { e.preventDefault(); startLogin({ username: $("su-name").value, signup: true }); };
 $("f-login").onsubmit = (e) => { e.preventDefault(); startLogin({ username: path }); };
 $("f-find").onsubmit = (e) => { e.preventDefault(); location.href = "/" + $("find-name").value.trim().toLowerCase(); };
 $("su-name").oninput = (e) => { e.target.value = e.target.value.toLowerCase(); };
-const inviteParam = new URLSearchParams(location.search).get("invite");
-if (inviteParam) $("invite").value = inviteParam;
 $("logout").onclick = async () => { await api("/api/logout", { method: "POST" }); location.href = "/"; };
 $("guide").onclick = () => $("guide-dlg").showModal();
 
@@ -122,25 +111,6 @@ $("agent-make").onclick = async () => {
 };
 $("copy").onclick = () => navigator.clipboard.writeText($("agent-url").textContent).then(() => $("copy").textContent = "Copied");
 
-async function loadInvites() {
-  const rows = await api("/api/invites");
-  $("inv").replaceChildren(...rows.map((r) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = "<td></td><td></td>";
-    tr.children[0].textContent = r.used_at ? r.code : `${location.origin}/signup?invite=${r.code}`;
-    tr.children[1].textContent = r.used_at ? (r.username || "deleted") : "unused";
-    return tr;
-  }));
-}
-$("inv-make").onclick = async () => { await api("/api/invites", { method: "POST" }); loadInvites(); };
-
-$("del").onclick = async () => {
-  const name = prompt("This cannot be undone. Type your username to delete everything:");
-  if (!name) return;
-  try { await api("/api/account/delete", { method: "POST", body: JSON.stringify({ username: name }) }); location.href = "/"; }
-  catch (err) { alert(err.message); }
-};
-
 async function load() {
   const s = await api("/api/session");
   const u = s.user;
@@ -157,8 +127,6 @@ async function load() {
   $("dash").hidden = false;
   $("who").textContent = u.username;
   document.title = u.username;
-  $("admin").hidden = !u.admin;
-  if (u.admin) loadInvites();
   if (location.hash === "#browser") openViewer();
 }
 load();

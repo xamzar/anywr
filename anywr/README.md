@@ -5,7 +5,7 @@ The productised (M3/M4) side of this repo, on its own VM. It never touches the
 soak VM. Its MCP still uses raw Playwright tools; `src/kernel/` (the digest
 kernel) is the obvious next swap.
 
-- **Site:** https://anywr.me — sign-in; `/signup` (invite code + username); `/<username>` (sign-in + dashboard)
+- **Site:** https://anywr.me — sign-in; `/signup` (username); `/<username>` (sign-in + dashboard)
 - **MCP:** `https://anywr.me/mcp/<token>`, one per user, minted on their page
 - **Viewer:** `https://anywr.me/<username>#browser` (KasmVNC at `/view/*`, authorised by the session cookie)
 
@@ -21,7 +21,7 @@ agent --> anywr.me/mcp/<token> -> app.py -> Playwright over CDP -> anywr-u<id>:9
 
 | | |
 |---|---|
-| `app.py` | Everything server-side: users, invites, sessions, agent tokens, the MCP tools, and the per-user containers (Docker Engine API over the socket). |
+| `app.py` | Everything server-side: users, sessions, agent tokens, the MCP tools, and the per-user containers (Docker Engine API over the socket). |
 | `static/` | `app.html` sign-up, sign-in and dashboard (routes by path). |
 | `chrome/` | The per-user browser image (`anywr-chrome`): Chrome on KasmVNC (X server + web viewer on :6080), CDP re-exported on :9223. |
 | `auth/` | Cloudflare Worker behind the Access app. Verifies the Access JWT and returns the email as a 2-minute HMAC ticket. |
@@ -34,10 +34,8 @@ which verifies the email. The ticket is bound to a state cookie set when the log
 began, so it only works in the browser that started it, and only once. Sign-in to
 `/<username>` succeeds only if the verified email is that page's email.
 
-Sign-up needs an invite code. Admins (`ADMIN_EMAILS` in `.env`) mint them on their
-page, or run `docker exec anywr-api python app.py invite`.
-
-Zero Trust free plan = 50 Access seats. Past that, swap the Access hop for SMTP OTP.
+Sign-up is open until `MAX_USERS` (45) accounts exist. Zero Trust free plan = 50 Access
+seats; past that, swap the Access hop for SMTP OTP.
 
 ## Browsers
 
@@ -62,7 +60,7 @@ ssh anywr 'cd /opt/anywr && docker compose up -d --build'
 cd auth && npx wrangler deploy
 ```
 
-`.env` on the VM: `ADMIN_EMAILS`, `BASE_URL`, `SSO_SECRET`. Worker secrets:
+`.env` on the VM: `BASE_URL`, `SSO_SECRET`, optional `MAX_USERS`. Worker secrets:
 `SSO_SECRET` (same value, local copy in `.sso_secret`) and `ACCESS_AUD`.
 
 Check: `python test_app.py` (no Docker or Cloudflare needed).

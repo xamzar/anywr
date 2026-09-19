@@ -1,4 +1,4 @@
-"""Self-check: invite-gated sign-up through the Access ticket, username pages,
+"""Self-check: capped sign-up through the Access ticket, username pages,
 agent links, and that the MCP dispatcher pins the user from the token (ignoring
 a spoofed header). No Docker or Cloudflare needed: ensure_running is stubbed to
 report which user it was asked for, and tickets are signed here the way
@@ -14,7 +14,7 @@ import os
 import time
 
 os.environ.setdefault("DB", "/tmp/anywr-test.db")
-os.environ["ADMIN_EMAILS"] = "admin@example.com"
+os.environ["MAX_USERS"] = "2"
 os.environ["SSO_SECRET"] = "test-secret"
 if os.path.exists(os.environ["DB"]):
     os.remove(os.environ["DB"])
@@ -74,28 +74,23 @@ def new_client():
 
 with new_client() as c:
     assert c.get("/").status_code == 200 and "anywr" in c.get("/").text
-    assert c.post("/api/login", json={"username": "admin", "invite": "nope"}).status_code == 400  # reserved
-    assert c.post("/api/login", json={"username": "boss", "invite": "nope"}).status_code == 400   # bad invite
-    code = A.mint_invite()
-    r = sign_in(c, "Admin@Example.com", username="Boss", invite=code)
+    assert c.post("/api/login", json={"username": "admin", "signup": True}).status_code == 400  # reserved
+    r = sign_in(c, "Admin@Example.com", username="Boss", signup=True)
     assert r.status_code == 303 and r.headers["location"] == "/boss", r.text
     me = c.get("/api/session").json()["user"]
-    assert me["username"] == "boss" and me["admin"] is True and me["email"] == "admin@example.com"
+    assert me["username"] == "boss" and me["email"] == "admin@example.com"
     assert c.get("/boss").status_code == 200
     assert c.get("/api/user/boss").json()["exists"] and not c.get("/api/user/nobody").json()["exists"]
 
-    # the invite is spent; a second sign-up with it fails before Access is even involved
     c2 = new_client()
-    assert c2.post("/api/login", json={"username": "bee", "invite": code}).status_code == 400
-    code2 = c.post("/api/invites").json()["code"]
-    r = sign_in(c2, "admin@example.com", username="bee", invite=code2)                      # email taken
-    assert r.status_code == 400 and "/cdn-cgi/access/logout" in r.text and f"invite={code2}" in r.text
-    assert sign_in(c2, "b@x.io", username="boss", invite=code2).status_code == 400            # name taken
-    r = sign_in(c2, "b@x.io", username="bee", invite=code2)
+    r = sign_in(c2, "admin@example.com", username="bee", signup=True)                      # email taken
+    assert r.status_code == 400 and "/cdn-cgi/access/logout" in r.text
+    assert sign_in(c2, "b@x.io", username="boss", signup=True).status_code == 400            # name taken
+    r = sign_in(c2, "b@x.io", username="bee", signup=True)
     assert r.status_code == 303 and r.headers["location"] == "/bee"
     b_id = c2.get("/api/session").json()["user"]["id"]
     admin_id = me["id"]
-    assert c2.get("/api/invites").status_code == 403
+    assert new_client().post("/api/login", json={"username": "cee", "signup": True}).status_code == 403  # full
 
     # log in to an existing page: only with that page's email
     c3 = new_client()
@@ -129,8 +124,7 @@ with new_client() as c:
     c2.post("/api/agent")
     assert c2.post("/api/account/delete", json={"username": "bee"}).status_code == 200
     c4 = new_client()
-    code3 = c.post("/api/invites").json()["code"]
-    assert sign_in(c4, "new@x.io", username="newbie", invite=code3).status_code == 303
+    assert sign_in(c4, "new@x.io", username="newbie", signup=True).status_code == 303
     s4 = c4.get("/api/session").json()
     assert s4["user"]["id"] > b_id and s4["agent"] is None, s4
     assert A.one("SELECT COUNT(*) n FROM agent_tokens WHERE user_id=?", (b_id,))["n"] == 0
