@@ -10,6 +10,12 @@ services:
       - data:/data
       # Root-equivalent on this host; the api is the only thing that needs it.
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      default:
+        # Caddy must reach the api over this network. By container name, Docker's
+        # DNS may answer with the api's address on a user's network instead, and
+        # deleting that network mid-request would cut the response off.
+        aliases: [api-internal]
   caddy:
     image: caddy:2-alpine
     container_name: anywr-caddy

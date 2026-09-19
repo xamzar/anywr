@@ -224,6 +224,7 @@ def _cdp_ws(uid):
     """Chrome answers /json only for an IP Host header and always reports
     127.0.0.1:9222, so resolve the container and re-point the URL at socat."""
     ip = socket.gethostbyname(name(uid))
+    socket.create_connection((ip, 6080), timeout=2).close()  # the viewer, too, before we say "up"
     info = json.load(urllib.request.urlopen(f"http://{ip}:9223/json/version", timeout=3))
     return info["webSocketDebuggerUrl"].replace("127.0.0.1:9222", f"{ip}:9223", 1)
 

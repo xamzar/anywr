@@ -1,5 +1,5 @@
-# One user's browser: Google Chrome on Xvfb, noVNC for the human, CDP for the agent.
-# Same recipe as workspace-hub's soak image, minus the probe tooling.
+# One user's browser: Google Chrome on KasmVNC's Xvnc (X server + web viewer in
+# one), CDP for the agent. Same Chrome recipe as workspace-hub's soak image.
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg ca-certificates \
@@ -7,7 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg ca-c
  && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
       > /etc/apt/sources.list.d/google-chrome.list \
  && apt-get update && apt-get install -y --no-install-recommends \
-      google-chrome-stable xvfb x11vnc fluxbox socat novnc websockify fonts-noto-cjk fonts-noto-color-emoji tini \
+      google-chrome-stable fluxbox socat fonts-noto-cjk fonts-noto-color-emoji tini \
+ && curl -fsSL -o /tmp/kasmvnc.deb https://github.com/kasmtech/KasmVNC/releases/download/v1.5.0/kasmvncserver_bookworm_1.5.0_amd64.deb \
+ && apt-get install -y --no-install-recommends /tmp/kasmvnc.deb && rm /tmp/kasmvnc.deb \
  && rm -rf /var/lib/apt/lists/*
 
 # Restore the last session (session cookies survive a stop), no password manager.

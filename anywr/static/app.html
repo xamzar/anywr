@@ -167,8 +167,8 @@ function renderState(s) {
 
 function openViewer() {
   $("view").textContent = "Starting…"; $("view").disabled = true;
-  // /view/* is authorised by this session cookie; Caddy picks your container.
-  $("viewer").src = "/view/vnc.html?path=view/websockify&autoconnect=1&resize=scale&reconnect=1";
+  // KasmVNC web client. /view/* is authorised by this session cookie; Caddy picks your container.
+  $("viewer").src = "/view/index.html?path=view/websockify&autoconnect=1&resize=scale&reconnect=1";
   $("viewer").hidden = false;
   $("viewer").onload = () => { $("view").textContent = "Viewer open"; renderState("running"); };
   clearInterval(beat);
