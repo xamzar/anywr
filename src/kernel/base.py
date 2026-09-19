@@ -1,5 +1,5 @@
 """The base tools: view / click / fill / select / read / session_status /
-handoff, over one already-running page.
+handoff, over one already-running page, plus the recording M5 promotes.
 
 A ref is a *position in the filtered list* digest.py produced, so it only means
 anything against the page state that produced it. Everything below exists to
@@ -32,6 +32,12 @@ MAX_OPTIONS = 40
 # happens. Wait a beat so a navigation that is coming has committed, then wait
 # on the document that is actually there.
 SETTLE_MS = 500
+# A recorded path is a menu walk, not a session. Anything longer is a sign the
+# recording was left on, and a 500-step adapter is not something anyone meant.
+MAX_RECORDED = 40
+# The ceiling on an adapter's wait step. Long enough for a slow Banner redirect,
+# short enough that a wait cannot be used to pin the one page the kernel owns.
+MAX_WAIT_MS = 10_000
 
 
 class KernelError(Exception):
@@ -75,6 +81,11 @@ async def attach(playwright, cdp, *, tab=0, max_tokens=digest.DEFAULT_MAX_TOKENS
 JS_OPTIONS = """el => el.tagName !== 'SELECT' ? null
   : [...el.options].map(o => ({label: o.label, value: o.value, disabled: o.disabled}))"""
 
+# A password field is never recorded, so it has to be recognisable. Asked of the
+# resolved element, not of the page: session.JS_PASSWORD_FIELD answers "is there
+# one here", which is a different question from "is this one".
+JS_IS_PASSWORD = "el => el.type === 'password'"
+
 
 def _options_are(live, total):
     """The options that exist, for the model to pick from.
@@ -103,12 +114,17 @@ class Kernel:
         self._page = page
         self._max_tokens = max_tokens
         self._shown = None  # (url, [Element]) from the last view(), or None
+        # None means not recording. A live recording is in memory and nowhere
+        # else: it is a draft of a path, it is discarded on a restart, and
+        # keeping it off the volume means there is no half-written file for a
+        # value to end up in before export_adapter() ever validates anything.
+        self._rec = None
 
     async def view(self):
         """The page as refs. Every other tool needs this to have run first."""
         handle, raw = await self._extract()
         await handle.dispose()  # view acts on nothing, so the handles are dead weight
-        text = await self._page.evaluate("() => document.body ? document.body.innerText : ''")
+        text = await self._page.evaluate(digest.JS_TEXT)
         self._shown = (self._page.url, digest.numbered(raw))
         return digest.build_digest(self._page.url, await self._page.title(), raw,
                                    text=text, max_tokens=self._max_tokens)
@@ -116,12 +132,14 @@ class Kernel:
     async def click(self, ref):
         """Click the element at `ref`, then return the resulting page."""
         el = await self._resolve(ref)
+        step = self._step("click", ref)
         log.debug("click ref=%s", ref)
         try:
             await el.click(timeout=ACT_TIMEOUT_MS)
         except PlaywrightTimeout as exc:
             raise KernelError(f"ref [{ref}] did not become clickable within "
                               f"{ACT_TIMEOUT_MS // 1000}s") from exc
+        self._keep(step)
         await self._settle()
         return await self.view()
 
@@ -132,6 +150,17 @@ class Kernel:
         into the field itself.
         """
         el = await self._resolve(ref)
+        # A password never becomes a step. The value would not be recorded
+        # either way, but a recorded password *field* turns into a required
+        # argument on a promoted tool -- which is an invitation to hand a
+        # credential to a replay. handoff() is the answer to a password, so the
+        # step is dropped here and export_adapter() refuses the recording
+        # outright rather than exporting a path with a hole in it.
+        secret = bool(await el.evaluate(JS_IS_PASSWORD))
+        step = None if secret else self._step("fill", ref)
+        if secret and self._rec and self._rec["on"]:
+            self._rec["dropped"] += 1
+            log.warning("recording: a fill into a password field was not recorded")
         log.debug("fill ref=%s", ref)  # no value, here or anywhere
         try:
             await el.fill(value, timeout=ACT_TIMEOUT_MS)
@@ -147,6 +176,7 @@ class Kernel:
                     if self._shown[1][ref - 1].role == "combobox" else "")
             raise KernelError(
                 f"ref [{ref}] cannot be filled: {exc.message.splitlines()[0]}{hint}") from exc
+        self._keep(step)
         return await self.view()
 
     async def select(self, ref, option):
@@ -178,11 +208,17 @@ class Kernel:
         if i is None:
             raise KernelError(f"ref [{ref}] has no option {want!r}. {_options_are(live, len(opts))}")
         log.debug("select ref=%s", ref)
+        # The label, never the option's value: the label is what the digest
+        # showed and what the model meant, and it is the string replay has to
+        # match against a dropdown that may have been rebuilt since.
+        step = self._step("select", ref,
+                          option=next(lab or val for j, lab, val in live if j == i))
         try:
             await el.select_option(index=i, timeout=ACT_TIMEOUT_MS)
         except PlaywrightTimeout as exc:
             raise KernelError(f"ref [{ref}] did not become selectable within "
                               f"{ACT_TIMEOUT_MS // 1000}s") from exc
+        self._keep(step)
         # A term dropdown that submits on change navigates; one that waits for a
         # button does not. _settle() covers both, as it does for click().
         await self._settle()
@@ -198,7 +234,7 @@ class Kernel:
         """
         handle, raw = await self._extract()
         await handle.dispose()
-        text = await self._page.evaluate("() => document.body ? document.body.innerText : ''")
+        text = await self._page.evaluate(digest.JS_TEXT)
         return session.status(
             self._page.url, await self._page.title(), text, digest.numbered(raw),
             password_field=await self._page.evaluate(session.JS_PASSWORD_FIELD))
@@ -214,7 +250,7 @@ class Kernel:
 
         `contains` keeps only lines holding that substring, case-insensitively.
         """
-        text = await self._page.evaluate("() => document.body ? document.body.innerText : ''")
+        text = await self._page.evaluate(digest.JS_TEXT)
         lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
         if contains:
             needle = contains.lower()
@@ -266,6 +302,110 @@ class Kernel:
         except Exception as exc:  # noqa: BLE001 - the outcome must survive a bad re-read
             return (f"{res.message}\n\n(the page could not be read back afterwards: "
                     f"{type(exc).__name__} — call view() yourself before acting.)")
+
+    # --- recording ----------------------------------------------------------
+    # Exploration is expensive and repetition should be free, so every
+    # successful act is kept -- but kept as what identifies the element
+    # *tomorrow*. A ref is a position in a list and means nothing by then;
+    # (role, name) is the pair _resolve() already trusts enough to act on, and
+    # `occurrence` is the only thing it does not carry, because _resolve() has a
+    # ref to disambiguate with and a replay does not.
+
+    def record(self, on):
+        """Start or stop recording. Returns what is in the recording now.
+
+        One tool with a flag rather than two tools: the model reads the whole
+        tool list on every call, and a second entry is a permanent cost for a
+        boolean. record(true) starts a fresh recording -- resuming into an old
+        one is how a path acquires a step nobody meant -- and record(false)
+        stops appending but keeps what it has, because export_adapter() is the
+        next call and it needs the steps.
+        """
+        if not isinstance(on, bool):
+            raise KernelError(f"record(on) takes true or false, not {on!r}")
+        if on:
+            self._rec = {"on": True, "steps": [], "dropped": 0, "full": False}
+            return ("recording — every click, fill and select that succeeds from here is a "
+                    "step. Walk the path once, then call record(false) and export_adapter().")
+        if self._rec is None:
+            return "nothing was being recorded. Call record(true) first, then walk the path."
+        self._rec["on"] = False
+        return f"recording stopped — {self.recording_summary()}"
+
+    def recording(self):
+        """(steps, dropped) as export_adapter() needs them."""
+        rec = self._rec or {"steps": [], "dropped": 0}
+        return list(rec["steps"]), rec["dropped"]
+
+    def recording_summary(self):
+        rec = self._rec
+        if rec is None:
+            return "nothing has been recorded; call record(true) before you explore."
+        if not rec["steps"] and not rec["dropped"]:
+            return "no steps. Every click, fill and select that succeeds is added."
+        verbs = "; ".join(f"{i + 1}. {v} {b['name']!r}"
+                          for i, s in enumerate(rec["steps"]) for v, b in s.items())
+        note = ""
+        if rec["dropped"]:
+            note = (f" {rec['dropped']} fill(s) into a password field were NOT recorded — an "
+                    "adapter may not type a credential, so this path cannot be exported. Use "
+                    "handoff() for the sign-in and record the part after it.")
+        if rec["full"]:
+            note += f" The recording filled up at {MAX_RECORDED} steps; later acts were dropped."
+        return f"{len(rec['steps'])} step(s): {verbs}.{note}"
+
+    def _step(self, verb, ref, **extra):
+        """The recordable form of an act about to happen on `ref`.
+
+        Built before the act, kept after it: a click that times out is not a
+        step, and the page it would have moved to is not part of the path.
+        """
+        if not (self._rec and self._rec["on"]):
+            return None
+        shown = self._shown[1]
+        el = shown[ref - 1]
+        occurrence = 1 + sum(1 for e in shown[:ref - 1] if (e.role, e.name) == (el.role, el.name))
+        return {verb: {"role": el.role, "name": el.name, "occurrence": occurrence, **extra}}
+
+    def _keep(self, step):
+        if step is None or not (self._rec and self._rec["on"]):
+            return
+        if len(self._rec["steps"]) >= MAX_RECORDED:
+            self._rec["full"] = True
+            return
+        self._rec["steps"].append(step)
+
+    # --- what the adapter interpreter walks on ------------------------------
+    # replay.py drives the tools above and these three, and holds no selector,
+    # no evaluate and no page of its own. Everything that touches the DOM is
+    # here, which is what keeps "an adapter is data" true of the runtime too.
+
+    def shown(self):
+        """The Elements of the last view(), or (). replay.py turns a recorded
+        (role, name, occurrence) back into a ref through this."""
+        return self._shown[1] if self._shown else ()
+
+    async def wait(self, ms):
+        """The `wait` verb. Bounded: an adapter holds the lock on the one page
+        this server owns, so it does not get to hold it indefinitely."""
+        await self._page.wait_for_timeout(max(0, min(int(ms), MAX_WAIT_MS)))
+
+    async def table_rows(self, selector, skip=0):
+        """Rows of the table `selector` names, as lists of cell text.
+
+        The selector is data passed to a fixed function; see JS_TABLE.
+        """
+        got = await self._page.evaluate(digest.JS_TABLE, [str(selector), max(0, int(skip))])
+        if got.get("error") == "selector":
+            raise KernelError(f"{selector!r} is not a valid CSS selector")
+        if got.get("error") == "missing":
+            raise KernelError(f"nothing on this page matches {selector!r}")
+        return got["rows"]
+
+    async def best_table(self):
+        """(selector, row count) for the likeliest data table here, or None."""
+        got = await self._page.evaluate(digest.JS_BEST_TABLE)
+        return (got["selector"], got["rows"]) if got else None
 
     # --- ref resolution -----------------------------------------------------
     # The whole point of this module. Re-running JS_CANDIDATES is chosen over
