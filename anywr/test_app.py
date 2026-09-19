@@ -31,8 +31,13 @@ async def fake_state(uid):
     return "none"
 
 
+async def fake_destroy(uid):
+    pass
+
+
 A.ensure_running = fake_ensure
 A.state = fake_state
+A.destroy = fake_destroy
 
 
 def b64(b):
@@ -117,6 +122,16 @@ with new_client() as c:
     assert mcp_call(c2, path, "tabs")[0] == 401           # rotated
     c2.delete("/api/agent")
     assert mcp_call(c2, url2[len(A.BASE):], "tabs")[0] == 401  # revoked
+
+    # a deleted user's id is never handed out again, so nothing of theirs is inherited
+    c2.post("/api/agent")
+    assert c2.post("/api/account/delete", json={"username": "bee"}).status_code == 200
+    c4 = new_client()
+    code3 = c.post("/api/invites").json()["code"]
+    assert sign_in(c4, "new@x.io", username="newbie", invite=code3).status_code == 303
+    s4 = c4.get("/api/session").json()
+    assert s4["user"]["id"] > b_id and s4["agent"] is None, s4
+    assert A.one("SELECT COUNT(*) n FROM agent_tokens WHERE user_id=?", (b_id,))["n"] == 0
 
     c2.post("/api/logout")
     assert c2.get("/api/session").json()["user"] is None

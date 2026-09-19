@@ -11,6 +11,9 @@ anywr.me {
 		forward_auth anywr-api:8000 {
 			uri /auth/view
 			copy_headers X-Upstream
+			# The viewer's websocket upgrade is for noVNC, not for the auth check.
+			header_up -Connection
+			header_up -Upgrade
 		}
 		reverse_proxy {header.X-Upstream}
 	}

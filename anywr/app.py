@@ -74,7 +74,9 @@ USER_HDR = b"x-anywr-user"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+    -- AUTOINCREMENT: an id is never reused, because containers, volumes and
+    -- stray rows are keyed by it and a new user must not inherit any of them.
+    id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE,
     email TEXT NOT NULL UNIQUE COLLATE NOCASE, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

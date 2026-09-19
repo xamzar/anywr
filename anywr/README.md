@@ -56,6 +56,8 @@ VM `anywr` (asia-east2-a, e2-standard-2, `anywr-ip`, **no service account**).
 cd anywr
 rsync -a --exclude __pycache__ --exclude .env --exclude .sso_secret --exclude auth ./ anywr:/opt/anywr/
 ssh anywr 'cd /opt/anywr && docker compose up -d --build'
+# Caddyfile changes: `docker compose restart caddy`. rsync swaps the file, and a
+# single-file bind mount keeps the old copy, so `caddy reload` alone reads stale config.
 # chrome image changes: docker build -t anywr-chrome chrome/  (running browsers pick it up when recreated)
 cd auth && npx wrangler deploy
 ```
