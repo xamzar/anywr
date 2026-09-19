@@ -126,11 +126,46 @@ def test_long_names_are_truncated():
 # printed, because "never silently drop" applies to the filter as well as the
 # cap.
 
-def test_blank_names_are_skipped_and_counted():
-    d = build_digest("u", "t", [e("link", "Home"), e("link", ""), e("button", "   "),
+def test_blank_named_links_are_skipped_and_counted():
+    d = build_digest("u", "t", [e("link", "Home"), e("link", ""),
                                 e("link", "\n\t "), e("link", None)])
     assert len(REF.findall(d)) == 1
-    assert "(4 unnamed elements — not addressable)" in d
+    assert "(3 unnamed elements — not addressable)" in d
+
+
+def test_a_form_control_with_no_name_is_kept_not_dropped():
+    """Banner's programme radio is labelled only by the table row around it.
+    Dropping it for being unnamed makes the form that reaches the grades
+    unusable, so a control falls back to its surrounding text, then to its role.
+    A link still gets dropped: an unnamed one is decoration."""
+    d = build_digest("u", "t", [{"role": "radio", "name": "", "ctx": "BSc Computer Science"},
+                                e("button", "   "), e("link", "")])
+    assert "[1]  radio   BSc Computer Science" in d
+    assert "[2]  button  (unlabelled button)" in d
+    assert "(1 unnamed element — not addressable)" in d  # the link, and only the link
+
+
+def test_two_controls_sharing_a_name_are_told_apart_by_their_surroundings():
+    """Grade Display has a "Go" for the page search and a "Go" that submits the
+    programme form. Undisambiguated they are two refs the model must guess
+    between."""
+    d = build_digest("u", "t", [{"role": "button", "name": "Go", "ctx": "Find a Page"},
+                                {"role": "button", "name": "Go", "ctx": "BSc Computer Science"}])
+    assert "Go — Find a Page" in d and "Go — BSc Computer Science" in d
+
+
+def test_a_name_that_is_already_unique_is_left_alone():
+    d = build_digest("u", "t", [{"role": "button", "name": "Go", "ctx": "Find a Page"},
+                                {"role": "button", "name": "Reset", "ctx": "Find a Page"}])
+    assert "[1]  button  Go\n" in d and "—" not in d
+
+
+def test_duplicates_their_context_cannot_separate_are_not_dressed_up():
+    """Appending identical context to identical names adds tokens and no
+    information; saying nothing is more honest than a fake distinction."""
+    d = build_digest("u", "t", [{"role": "button", "name": "Go", "ctx": "same"},
+                                {"role": "button", "name": "Go", "ctx": "same"}])
+    assert "—" not in d
 
 
 def test_no_unnamed_note_when_every_element_has_a_name():

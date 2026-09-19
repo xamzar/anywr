@@ -203,6 +203,35 @@ class Kernel:
             self._page.url, await self._page.title(), text, digest.numbered(raw),
             password_field=await self._page.evaluate(session.JS_PASSWORD_FIELD))
 
+    async def read(self, contains=None, max_tokens=digest.DEFAULT_MAX_TOKENS):
+        """The page's visible text, which view() counts but never quotes.
+
+        view() shows what can be acted on; the payload of a portal page -- a
+        grade table, a balance, a timetable -- is text and has no ref. Reading
+        it is the one place the model is meant to pay for detail, so it is a
+        separate call it makes once rather than a cost on every step. That is
+        the whole shape of the digest thesis: cheap to move, pay to look.
+
+        `contains` keeps only lines holding that substring, case-insensitively.
+        """
+        text = await self._page.evaluate("() => document.body ? document.body.innerText : ''")
+        lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+        if contains:
+            needle = contains.lower()
+            lines = [ln for ln in lines if needle in ln.lower()]
+            if not lines:
+                return (f"no line on this page contains {contains!r}. Call read() with no "
+                        "filter to see the whole page, or view() if you meant to act on it.")
+        head = f"url: {digest.clean(self._page.url)}\n\n"
+        # Truncate from the tail with the omission stated, exactly as the digest
+        # does: a silent cut here would look like a page that simply ends.
+        budget, kept = max_tokens - digest.tokens(head), []
+        for ln in lines:
+            if digest.tokens("\n".join(kept + [ln])) > budget:
+                return head + "\n".join(kept) + f"\n({len(lines) - len(kept)} more lines — not shown)"
+            kept.append(ln)
+        return head + "\n".join(kept)
+
     # --- ref resolution -----------------------------------------------------
     # The whole point of this module. Re-running JS_CANDIDATES is chosen over
     # stamping a data-* attribute during view(): stamping mutates a page the

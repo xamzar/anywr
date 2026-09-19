@@ -172,6 +172,21 @@ async def session_status() -> str:
     return await _run("session_status", lambda k: k.session_status())
 
 
+@mcp.tool
+async def read(contains: str | None = None) -> str:
+    """Read the page's visible text — the part view() counts but does not quote.
+
+    view() shows what you can *act on*; what a page is *for* — a grade table, a
+    balance, a timetable — is text and has no ref. Call this when you need the
+    content itself rather than a way through the page. Takes no ref.
+
+    `contains` keeps only the lines holding that substring, case-insensitively,
+    which is the cheap way to pull one row out of a long table. Long pages are
+    truncated with the number of omitted lines stated.
+    """
+    return await _run("read", lambda k: k.read(contains))
+
+
 # --- transports -------------------------------------------------------------
 # One server definition, two ways in: http is the deployed path, stdio is what
 # Claude Desktop attaches to over an SSH tunnel.

@@ -44,6 +44,7 @@ class Element:
     name: str
     index: int = -1
     href: str = ""
+    ctx: str = ""
 
 
 def _field(e, key):
@@ -65,12 +66,24 @@ def clean(s):
     return _WS.sub(" ", str(s or "").replace("<", " ").replace(">", " ")).strip()
 
 
+def _cap(s):
+    return s[:MAX_NAME - 1] + "…" if len(s) > MAX_NAME else s
+
+
 def _norm(e):
-    """(role, name) for one raw element, cleaned and length-capped."""
+    """(role, name) for one raw element, cleaned and length-capped.
+
+    A form control with no accessible name falls back to the text it sits in.
+    Banner's programme radio is labelled only by its table row, and dropping it
+    for being unnamed makes the form that reaches the grades unusable. Links do
+    not get this: an unnamed link is usually decoration, and its surroundings
+    are the text of whatever it decorates.
+    """
+    role = clean(_field(e, "role")).lower()
     name = clean(_field(e, "name"))
-    if len(name) > MAX_NAME:
-        name = name[:MAX_NAME - 1] + "…"
-    return clean(_field(e, "role")).lower(), name
+    if not name and role in INTERACTIVE and role != "link":
+        name = clean(_field(e, "ctx")) or f"(unlabelled {role})"
+    return role, _cap(name)
 
 
 def _rank(raw, name):
@@ -101,14 +114,38 @@ def numbered(elements):
             # breaks a tie. Ranking on length alone loses "My Benefits" to
             # "Blue ball graphic", which is the whole failure this guards.
             if _rank(elements[i], name) > _rank(elements[out[-1].index], out[-1].name):
-                out[-1] = Element(out[-1].ref, role, name, i, href)
+                out[-1] = Element(out[-1].ref, role, name, i, href, clean(_field(elements[i], "ctx")))
             continue
-        out.append(Element(len(out) + 1, role, name, i, href))
-    return out
+        out.append(Element(len(out) + 1, role, name, i, href, clean(_field(elements[i], "ctx"))))
+    return _disambiguate(out)
 
 
-def _tokens(chars):
-    return math.ceil(chars / CHARS_PER_TOKEN)
+def _disambiguate(els):
+    """Two controls with one name are two refs the model must guess between.
+
+    Banner's Grade Display has a "Go" for the page search and a "Go" that
+    submits the programme form. Told apart only by the text around them, so
+    where a name repeats, that text is appended -- and only there, because it is
+    noise on every element that was already distinct.
+    """
+    seen = {}
+    for e in els:
+        seen.setdefault((e.role, e.name), []).append(e)
+    for (role, name), group in seen.items():
+        if len(group) < 2 or role == "link":
+            continue
+        if len({e.ctx for e in group}) < len(group):
+            continue  # the context does not separate them either; do not pretend
+        for e in group:
+            els[e.ref - 1] = Element(e.ref, role, _cap(f"{name} — {e.ctx}"), e.index, e.href, e.ctx)
+    return els
+
+
+def tokens(text_or_chars):
+    """Estimated tokens. Public because base.py's read() budgets the same way
+    the digest does, and two estimators would truncate at two different sizes."""
+    n = text_or_chars if isinstance(text_or_chars, int) else len(text_or_chars)
+    return math.ceil(n / CHARS_PER_TOKEN)
 
 
 def _line(el, ref_w, role_w):
@@ -160,7 +197,7 @@ def build_digest(url, title, elements, *, text="", max_tokens=DEFAULT_MAX_TOKENS
     lines = [_line(e, ref_w, role_w) for e in els]
 
     whole = head + "\n" + "".join(f"{ln}\n" for ln in lines) + foot
-    if _tokens(len(whole)) <= max_tokens:
+    if tokens(len(whole)) <= max_tokens:
         return whole
 
     # Truncate from the tail. The reserve is the widest the omission line can
@@ -170,7 +207,7 @@ def build_digest(url, title, elements, *, text="", max_tokens=DEFAULT_MAX_TOKENS
     used = len(head) + 1 + len(foot) + len(_more(len(lines)))
     kept = 0
     for ln in lines:
-        if _tokens(used + len(ln) + 1) > max_tokens:
+        if tokens(used + len(ln) + 1) > max_tokens:
             break
         used += len(ln) + 1
         kept += 1
@@ -203,13 +240,25 @@ JS_DESCRIBE = """els => {
   // is named by that image's alt, which is about the decoration and not the
   // destination -- so it loses to its twin whatever the two are called.
   const own = el => !!(el.innerText || '').trim();
+  // The text a control sits in. Banner labels a radio by the table row around
+  // it and gives two different forms a "Go" button each, so for form controls
+  // the surrounding text is the only thing that says which is which.
+  const ctx = el => {
+    let n = el.parentElement, d = 0;
+    while (n && d++ < 4) {
+      const t = (n.innerText || '').replace(/\\s+/g, ' ').trim();
+      if (t && t.length <= 120) return t;
+      n = n.parentElement;
+    }
+    return '';
+  };
   const name = el => el.getAttribute('aria-label')
     || (el.labels && el.labels[0] ? el.labels[0].innerText : '')
     || el.innerText || el.getAttribute('placeholder') || el.getAttribute('title')
     || (['submit', 'reset', 'button'].includes(el.type) ? el.value : '')
     || ((el.querySelector('img') || {}).alt) || '';
   return els.map(el => ({role: role(el), name: (name(el) || '').slice(0, 200),
-                         href: href(el), own: own(el)}));
+                         href: href(el), own: own(el), ctx: ctx(el).slice(0, 120)}));
 }"""
 
 # One evaluate, not one locator call per element: 200 elements over CDP is 200

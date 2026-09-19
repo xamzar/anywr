@@ -59,16 +59,17 @@ def tool_names():
     return {t.name for t in asyncio.run(server.mcp.list_tools())}
 
 
-def test_the_tool_set_is_exactly_the_five_base_tools():
-    assert tool_names() == {"view", "click", "fill", "select", "session_status"}
+def test_the_tool_set_is_exactly_the_six_base_tools():
+    assert tool_names() == {"view", "click", "fill", "select", "session_status", "read"}
 
 
 def test_the_tools_m1_cut_are_absent():
-    """select() left this list when Banner's Final Grades page turned out to be
-    unreachable without it; open() and evaluate() are still cut by design, and
-    the rest were never in M1's scope."""
+    """select() and read() both left this list on the live run: Final Grades is
+    unreachable without select(), and the grades themselves are page text, so
+    view() could reach them and not report them. open() and evaluate() are still
+    cut by design, and the rest were never in M1's scope."""
     assert not tool_names() & {"open", "evaluate", "screenshot", "snapshot", "press",
-                               "close_tab", "workspaces", "handoff", "back", "read"}
+                               "close_tab", "workspaces", "handoff", "back"}
 
 
 def test_no_tool_takes_a_workspace():
