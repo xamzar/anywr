@@ -17,5 +17,47 @@ services:
       - ./src:/app/src:ro
       - ./config:/app/config:ro
       - ./tests:/app/tests:ro
+
+  # A second, general-purpose browser: same image, its own profile and data,
+  # so nothing done here touches the soak experiment.
+  work:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    restart: unless-stopped
+    env_file: config/.env
+    environment: { CDP_PROXY: "1" }
+    security_opt: [seccomp=unconfined]
+    shm_size: 1gb
+    stop_grace_period: 60s
+    ports: ["127.0.0.1:6081:6080"]   # noVNC over the SSH tunnel: ssh -L 6081:localhost:6081 soak
+    volumes:
+      - work-profile:/profile
+      - work-data:/data
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+
+  # Playwright MCP server. Shares soak's network namespace because soak's
+  # Chrome only listens on localhost and soak must not be rebuilt mid-soak.
+  mcp:
+    build: { context: ., dockerfile: docker/mcp.Dockerfile }
+    restart: unless-stopped
+    network_mode: "service:soak"
+    environment: { VIEW_BASE: "https://mcp.xmzr.dev/ws/view" }
+    volumes:
+      - ./data:/data
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+
+  # Front door for mcp-hub's Caddy (mcp.xmzr.dev/ws/*). Bound to the VPC
+  # address only; no firewall rule opens 8090 to the internet.
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    env_file: config/gateway.env
+    ports: ["10.170.0.6:8090:80"]
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+
 volumes:
   profile:
+  work-profile:
+  work-data:

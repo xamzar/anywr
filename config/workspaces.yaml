@@ -1,0 +1,8 @@
+# Browsers the MCP server can drive. cdp = host:port as seen from the mcp container
+# (which shares soak's network namespace, so soak is plain localhost).
+soak:
+  cdp: "127.0.0.1:9222"
+  about: "Track 0 soak browser, logged in to the test accounts. Actions here are logged as experiment contamination."
+work:
+  cdp: "work:9223"
+  about: "General-purpose workspace. Free to use for anything."

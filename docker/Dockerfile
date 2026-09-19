@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg ca-c
  && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
       > /etc/apt/sources.list.d/google-chrome.list \
  && apt-get update && apt-get install -y --no-install-recommends \
-      google-chrome-stable xvfb x11vnc fluxbox novnc websockify fonts-noto-cjk fonts-noto-color-emoji tini \
+      google-chrome-stable xvfb x11vnc fluxbox socat novnc websockify fonts-noto-cjk fonts-noto-color-emoji tini \
  && rm -rf /var/lib/apt/lists/*
 
 # Playwright is only a CDP client here (connect_over_cdp); no bundled browsers.

@@ -31,6 +31,10 @@ google-chrome-stable \
   about:blank &
 CHROME=$!
 
+# Chrome only binds CDP to localhost; workspaces the MCP server reaches over
+# the Docker network re-export it. (soak does not: the MCP shares its netns.)
+[ -n "${CDP_PROXY:-}" ] && socat TCP-LISTEN:9223,fork,reuseaddr TCP:127.0.0.1:9222 &
+
 stop() {
   echo "SIGTERM: stopping Chrome gracefully"
   kill -TERM "$CHROME" 2>/dev/null

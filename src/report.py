@@ -98,6 +98,10 @@ def main():
     if restart_deaths:
         out.append(f"Restart sub-verdict: {', '.join(restart_deaths)} died across a stop/start. Investigate the "
                    "graceful-shutdown path (cookie flush before kill) before accepting a RED.")
+    agent = sum(k == "AGENT_ACTION" for _, k, _ in events)
+    if agent:
+        out.append(f"**Contaminated:** an agent acted in the soak browser {agent} time(s) after T0 (see events). "
+                   "Survival of any site it touched may come from use, not from parking — discount those sites.")
     if verdict == "RED":
         out.append("RED only stands if pinning the egress IP does not fix it. This rig already runs on a pinned "
                    "static IP, so a Tier 1 death here does count.")

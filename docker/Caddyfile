@@ -1,0 +1,22 @@
+# Reached only from mcp-hub's Caddy over the VPC (mcp.xmzr.dev/ws/*, behind the
+# mcp-hub Cloudflare Access app). The shared key keeps other VPC hosts out.
+# `route` keeps written order: bare directives get re-sorted and the key check
+# would run after the proxies.
+:80 {
+	route {
+		@nokey not header X-WS-Key {env.WS_KEY}
+		respond @nokey 403
+
+		handle_path /view/soak/* {
+			reverse_proxy soak:6080
+		}
+		handle_path /view/work/* {
+			reverse_proxy work:6080
+		}
+		# The MCP server shares soak's network namespace, so it answers on soak:8000.
+		handle /mcp* {
+			reverse_proxy soak:8000
+		}
+		respond "workspace-hub" 200
+	}
+}

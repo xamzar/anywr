@@ -27,6 +27,28 @@ No VNC password: noVNC is bound to the VM's loopback, so the SSH tunnel is the g
 Firewall: GCP project rule `allow-ssh-direct` (tcp/22, key-only sshd) is the only
 way in; nothing else is published.
 
+## MCP: agent control of the browsers
+
+`src/mcp_server.py` (container `mcp`) drives the workspace Chromes over CDP with
+Playwright. Tools: `workspaces`, `open`, `snapshot` (accessibility tree), `screenshot`,
+`click`, `fill`, `press`, `select`, `evaluate`, `close_tab`, `handoff` (returns the
+live-viewer link so a human can clear a login, 2FA or captcha).
+
+- **Workspaces** (`config/workspaces.yaml`): `soak` is the experiment browser, and every
+  mutating call on it is logged as an `AGENT_ACTION` event, which `report.py` flags as
+  contamination. `work` is a separate Chrome with its own profile, free for anything.
+- **Remote:** `https://mcp.xmzr.dev/ws/mcp` (add as a claude.ai connector). The chain is
+  Cloudflare Access (the mcp-hub app) → mcp-hub Caddy `/ws/*` → VPC `10.170.0.6:8090` →
+  `gateway` Caddy (requires the `X-WS-Key` header from `config/gateway.env`) → mcp.
+- **Viewers:** `https://mcp.xmzr.dev/ws/view/<soak|work>/vnc.html?path=ws/view/<ws>/websockify&autoconnect=1&resize=scale`
+- **Over SSH** (for people not in the Access policy):
+  `ssh -N -L 8090:10.170.0.6:8090 soak`, then
+  `claude mcp add --transport http workspace http://localhost:8090/mcp --header "X-WS-Key: <key>"`.
+  The key is in `~/workspace-hub/config/gateway.env` on the VM.
+- **Deploying mcp changes:** `docker compose restart mcp` (src/ is mounted). Never
+  `docker compose up` without `--no-deps` for mcp/work/gateway: `mcp` depends on
+  `soak` and would rebuild or recreate it.
+
 ## Runbook
 
 1. **Deploy/update** (from the laptop):
