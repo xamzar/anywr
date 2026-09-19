@@ -13,10 +13,9 @@ sleep 1
 # instead of covering the whole screen with no way back.
 fluxbox >/dev/null 2>&1 &
 
-# The password file lives in the container only; VNC also listens on localhost
-# only, and the published noVNC port is bound to the host's loopback.
-x11vnc -storepasswd "${VNC_PASSWORD:?set VNC_PASSWORD in .env}" /tmp/vncpass >/dev/null
-x11vnc -display :99 -rfbauth /tmp/vncpass -localhost -shared -forever -quiet -rfbport 5900 &
+# No VNC password: x11vnc listens on the container's localhost and noVNC on the
+# host's loopback, so the SSH tunnel is the only way in.
+x11vnc -display :99 -nopw -localhost -shared -forever -quiet -rfbport 5900 &
 websockify --web /usr/share/novnc 6080 localhost:5900 >/dev/null 2>&1 &
 
 google-chrome-stable \

@@ -23,7 +23,7 @@ restarts? Design and decision rules: `plan.md`. Results: `findings.md` (day 7).
     ssh soak            # ~/.ssh/config forwards localhost:6080
     open http://localhost:6080/vnc.html?autoconnect=1&resize=scale
 
-The VNC password is in `~/workspace-hub/config/.env` on the VM.
+No VNC password: noVNC is bound to the VM's loopback, so the SSH tunnel is the gate.
 Firewall: GCP project rule `allow-ssh-direct` (tcp/22, key-only sshd) is the only
 way in; nothing else is published.
 
