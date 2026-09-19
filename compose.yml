@@ -1,0 +1,23 @@
+# The per-user browsers are NOT in this file: the api creates them (anywr-u<id>)
+# through the Docker socket. Build their image first: docker build -t anywr-chrome chrome/
+services:
+  api:
+    build: .
+    container_name: anywr-api
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - data:/data
+      # Root-equivalent on this host; the api is the only thing that needs it.
+      - /var/run/docker.sock:/var/run/docker.sock
+  caddy:
+    image: caddy:2-alpine
+    container_name: anywr-caddy
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+volumes:
+  data:
+  caddy:

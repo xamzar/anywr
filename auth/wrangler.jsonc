@@ -1,0 +1,17 @@
+{
+  // Sits behind a Cloudflare Access app (one-time PIN) on anywr-auth.xmzr.dev.
+  // Access emails the code; this turns the verified email into a signed ticket
+  // for anywr.me/auth/callback. See ../app.py read_ticket().
+  "name": "anywr-auth",
+  "main": "index.js",
+  "compatibility_date": "2026-07-29",
+  "account_id": "cde55b4f276c1802c5d3c5db5627b79b",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "anywr-auth.xmzr.dev", "custom_domain": true }],
+  "vars": {
+    "TEAM": "https://xmzr-code.cloudflareaccess.com",
+    "RETURN_URL": "https://anywr.me/auth/callback"
+    // ACCESS_AUD, SSO_SECRET: wrangler secret put
+  }
+}
