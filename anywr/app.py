@@ -207,8 +207,6 @@ async def _create(uid):
     await dk("POST", "/networks/create", ok=(201, 409), json={
         "Name": net, "Labels": {"anywr": "1"},
         "IPAM": {"Config": [{"Subnet": subnet(uid)}]}})
-    for c in (SELF, CADDY):
-        await dk("POST", f"/networks/{net}/connect", ok=(200, 403, 409), json={"Container": c})
     await dk("POST", f"/containers/create?name={net}", json={
         "Image": IMAGE, "Hostname": net, "Labels": {"anywr": str(uid)}, "StopTimeout": 30,
         "HostConfig": {
@@ -249,6 +247,10 @@ async def ensure_running(uid):
             if s == "none":
                 await _create(uid)
             await dk("POST", f"/containers/{name(uid)}/start")
+        # Every time, not only at creation: a redeploy recreates the api and Caddy
+        # containers, and the new ones are on none of the users' networks.
+        for c in (SELF, CADDY):
+            await dk("POST", f"/networks/{name(uid)}/connect", ok=(200, 403, 409), json={"Container": c})
     for _ in range(60):
         try:
             return await asyncio.to_thread(_cdp_ws, uid)
