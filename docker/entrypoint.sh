@@ -9,6 +9,9 @@ python /app/src/db.py boot   # records CONTAINER_RESTART or HOST_REBOOT
 
 Xvfb :99 -screen 0 1440x900x24 -nolisten tcp &
 sleep 1
+# A window manager, so OAuth popups get a title bar and a taskbar entry
+# instead of covering the whole screen with no way back.
+fluxbox >/dev/null 2>&1 &
 
 # The password file lives in the container only; VNC also listens on localhost
 # only, and the published noVNC port is bound to the host's loopback.
