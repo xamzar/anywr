@@ -1,8 +1,9 @@
 # anywr
 
 A cloud Chrome per user that stays logged in, driven by the user's agent over MCP.
-The productised version of `~/projects/personal/workspace-hub` (whose soak VM this
-never touches).
+The productised (M3/M4) side of this repo, on its own VM. It never touches the
+soak VM. Its MCP still uses raw Playwright tools; `src/kernel/` (the digest
+kernel) is the obvious next swap.
 
 - **Site:** https://anywr.me — landing; `/signup` (invite code + username); `/<username>` (sign-in + dashboard)
 - **MCP:** `https://anywr.me/mcp/<token>`, one per user, minted on their page
@@ -52,6 +53,7 @@ VM `anywr` (asia-east2-a, e2-standard-2, `anywr-ip`, **no service account**).
 `ssh anywr`. Code lives in `/opt/anywr`.
 
 ```sh
+cd anywr
 rsync -a --exclude __pycache__ --exclude .env --exclude .sso_secret --exclude auth ./ anywr:/opt/anywr/
 ssh anywr 'cd /opt/anywr && docker compose up -d --build'
 # chrome image changes: docker build -t anywr-chrome chrome/  (running browsers pick it up when recreated)

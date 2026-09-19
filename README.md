@@ -3,6 +3,9 @@
 Does a browser profile on a datacenter IP stay logged in for 7+ days, across
 restarts? Design and decision rules: `plan.md`. Results: `findings.md` (day 7).
 
+`anywr/` is the multi-user product at https://anywr.me (its own VM and its own
+README). Everything below is the Track 0 rig.
+
 ## What is running where
 
 - **VM** `soak` — GCP `asia-east2-a` (Hong Kong, same region as mcp-hub, near
