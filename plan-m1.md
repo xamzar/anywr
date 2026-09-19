@@ -115,11 +115,24 @@ the grades.
 
 ## M3 — Yours, from anywhere
 
-- Auth Worker: email OTP → signed cookie (≤24h) → proxy `/username`.
-- Encrypted persistent volume; machine stops on idle, starts on request.
+**Decided 2026-09-19: no OTP service. Cloudflare Access is the front door.** An OTP service
+was built and reverted (`d108004`, reverted by `fee50e2`) — Access already gates
+`mcp.xmzr.dev` and injects the gateway key, so it was a second login in front of the same
+door, and two auth systems where one will do is worse than either.
 
-**Done when:** you shut your laptop, open `anywr.live/asanbl4` on your phone, enter an OTP,
-and land in the same session.
+What this defers rather than solves: Access is free to 50 seats and $7/seat/month after,
+which does not work for a SaaS. **M4 needs its own front door**, and the reverted commit is
+where to start reading when it does.
+
+**Domain:** `anywr.me` is owned. Staying on `mcp.xmzr.dev` for now; the swap is DNS plus the
+browser-facing path prefixes, not a code change.
+
+**Still not built: stop-on-idle.** The machine that would stop is the one running Track 0.
+It needs a second box, and its design depends on whether sessions survive a stop/start —
+which was what Track 0 was for.
+
+**Done when:** you shut your laptop, open the workspace on your phone, clear Access, and land
+in the same session.
 
 ---
 
@@ -129,12 +142,20 @@ One MCP server per user, scoped to **one** browser — drop the `workspace` argu
 tool signature. Per-user key on the gateway; no shared `X-WS-Key`. This inverts today's
 topology, where one server reaches every browser by name.
 
-**Isolation substrate is deliberately undecided.** Fly Machines give each user a real virtual
-machine but move between hosts, so the egress IP changes. Hetzner + gVisor keeps a fixed IP
-and lets you buy one per user, at a speed cost. Which is right depends on whether device
-trust survives an IP change — which is exactly what Track 0 measures and has not yet
-answered. Until then: plain Docker, one container per user, and the README says in plain
-words that this is not real isolation and no second real person goes on the box.
+**Isolation substrate is undecided, and will now be decided without data.** Fly Machines give
+each user a real virtual machine but move between hosts, so the egress IP changes. Hetzner +
+gVisor keeps a fixed IP and lets you buy one per user, at a speed cost. Which is right
+depends on whether device trust survives an IP change — the question Track 0 existed to
+answer, and which was dropped on 2026-09-19 without running. Pick by judgement, and treat the
+choice as reversible rather than settled.
+
+Until then: plain Docker, one container per user, and the README says in plain words that
+this is not real isolation and no second real person goes on the box.
+
+**M4 also inherits the front door.** With the OTP service reverted, there is no per-user
+auth and no `/username` routing — Access proves you are *someone allowed in*, not *which
+user*. One browser, one workspace. A second entry anywhere puts that person inside the
+first's live sessions.
 
 **Done when:** two accounts exist and neither can reach the other's profile.
 
