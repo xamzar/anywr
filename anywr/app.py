@@ -61,7 +61,7 @@ IDLE = int(os.environ.get("IDLE_MINUTES", "30")) * 60
 SESSION_TTL = 30 * 86400
 COOKIE = "awsid"
 TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")
-USERNAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?")
+USERNAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,28}[a-z0-9])?")
 # Top-level paths the app itself uses, plus names that would confuse people.
 RESERVED = {"api", "auth", "mcp", "view", "signup", "login", "logout", "admin", "static",
             "www", "help", "about", "terms", "privacy", "favicon.ico", "robots.txt", "anywr"}
@@ -554,7 +554,7 @@ async def login_start(b: Start, resp: Response):
         intent = {"login": u["id"]}
     else:
         if not USERNAME_RE.fullmatch(username) or username in RESERVED:
-            raise HTTPException(400, "usernames are 3-30 characters: a-z, 0-9 and dashes")
+            raise HTTPException(400, "usernames are 1-30 characters: a-z, 0-9 and dashes")
         if one("SELECT id FROM users WHERE username=?", (username,)):
             raise HTTPException(400, "that username is taken")
         if full():

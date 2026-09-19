@@ -61,7 +61,7 @@
 <section id="auth" class="auth" hidden><div>
   <form id="f-signup" hidden>
     <label for="su-name">Pick a username</label>
-    <input id="su-name" autocomplete="username" autocapitalize="none" spellcheck="false" pattern="[a-z0-9][a-z0-9\-]{1,28}[a-z0-9]" title="3-30 characters: a-z, 0-9, dashes" required>
+    <input id="su-name" autocomplete="username" autocapitalize="none" spellcheck="false" pattern="[a-z0-9]([a-z0-9\-]{0,28}[a-z0-9])?" title="1-30 characters: a-z, 0-9, dashes" required>
     <div class="row"><button class="primary">Sign up</button><a href="/">I have an account</a></div>
   </form>
   <form id="f-find" hidden>
