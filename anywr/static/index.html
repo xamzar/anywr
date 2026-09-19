@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>anywr — a cloud browser your agent can use</title>
+<meta name="description" content="A Chrome in the cloud that stays logged in to your sites, and a private MCP link that lets Claude use it for you.">
+<style>
+  :root {
+    --bg: #fff; --panel: #fff; --fg: #18181b; --muted: #52525b; --subtle: #71717a;
+    --border: #e4e4e7; --soft: #f4f4f5; --brand: #4f46e5; --brand-fg: #4338ca; --brand-soft: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0b0b0e; --panel: #111114; --fg: #f4f4f5; --muted: #a1a1aa; --subtle: #8b8b94;
+      --border: #27272a; --soft: #18181b; --brand: #6366f1; --brand-fg: #a5b4fc; --brand-soft: #1e1b4b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+  .narrow { max-width: 760px; margin: 0 auto; padding: 0 16px; }
+  header { border-bottom: 1px solid var(--border); background: var(--panel); }
+  .bar { display: flex; align-items: center; gap: 12px; height: 56px; }
+  .brand { font-weight: 700; letter-spacing: -0.02em; font-size: 18px; text-decoration: none; }
+  .brand span, .accent { color: var(--brand-fg); }
+  .grow { flex: 1; }
+  .btn { display: inline-block; border-radius: 8px; padding: 8px 14px; text-decoration: none; font-weight: 500;
+    border: 1px solid var(--border); font-size: 15px; }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .btn.ghost { border-color: transparent; }
+  .btn.lg { padding: 12px 20px; font-size: 16px; }
+  .hero { text-align: center; padding: 88px 0 48px; }
+  .badge { display: inline-block; background: var(--brand-soft); color: var(--brand-fg); border-radius: 999px;
+    padding: 4px 12px; font-size: 13px; font-weight: 500; margin-bottom: 20px; }
+  h1 { font-size: clamp(36px, 7vw, 60px); line-height: 1.05; letter-spacing: -0.035em; margin: 0; }
+  h1 .accent { display: block; }
+  .lede { color: var(--muted); font-size: clamp(16px, 2.2vw, 18px); max-width: 640px; margin: 20px auto 0; }
+  .ctas { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 32px; }
+  .fine { color: var(--subtle); font-size: 14px; margin-top: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } .hero { padding-top: 56px; } }
+  .card { border: 1px solid var(--border); border-radius: 12px; padding: 20px; background: var(--panel); }
+  .card.subtle { background: var(--soft); border-color: transparent; }
+  .card .icon { font-size: 26px; line-height: 1; }
+  .card h3 { font-size: 16px; margin: 10px 0 6px; }
+  .card.subtle h3 { font-size: 14px; margin-top: 0; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .card.subtle p { font-size: 14px; }
+  section { padding: 32px 0; }
+  h2 { font-size: 28px; letter-spacing: -0.02em; margin: 0 0 32px; }
+  .step { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 28px; }
+  .num { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--soft); color: var(--muted);
+    display: grid; place-items: center; font-weight: 700; font-size: 14px; }
+  .step h3 { margin: 2px 0 4px; font-size: 18px; }
+  .step p { margin: 0; color: var(--muted); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; background: var(--soft);
+    padding: 1px 6px; border-radius: 4px; }
+  footer { border-top: 1px solid var(--border); margin-top: 32px; }
+  footer .bar { height: 64px; font-size: 14px; color: var(--muted); }
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<header><div class="wrap bar">
+  <a class="brand" href="/">any<span>wr</span></a>
+  <div class="grow"></div>
+  <a class="btn ghost" href="/login">Sign in</a>
+  <a class="btn primary" href="/signup">Get started</a>
+</div></header>
+
+<div class="narrow hero">
+  <span class="badge">Invite-only beta</span>
+  <h1>A browser that stays logged in.<span class="accent">Your agent does the clicking.</span></h1>
+  <p class="lede">anywr gives you a Chrome that lives in the cloud and keeps your sessions for weeks, plus a private
+    MCP link that lets Claude open pages, fill forms and read what's on screen for you. Anywhere, from any device.</p>
+  <div class="ctas">
+    <a class="btn primary lg" href="/signup">Get started</a>
+    <a class="btn lg" href="#how">How it works</a>
+  </div>
+  <p class="fine">Have an invite code? That's all you need. Already in? Go to <code>anywr.me/yourname</code>.</p>
+</div>
+
+<div class="wrap"><div class="grid">
+  <div class="card"><div class="icon">🔐</div><h3>Logged in, and it stays that way</h3>
+    <p>Sign in to your portals, inboxes and dashboards once. Your profile lives on a fixed IP and is kept between sessions, so there are far fewer "new device" prompts.</p></div>
+  <div class="card"><div class="icon">🤖</div><h3>Built for agents</h3>
+    <p>Every browser action is an MCP tool: open, read, click, fill, screenshot. Paste one link into Claude and it can use your browser, and only yours.</p></div>
+  <div class="card"><div class="icon">🙋</div><h3>You step in when it counts</h3>
+    <p>2FA prompt or captcha? The agent hands you a live view of the same browser. Click through it and the agent picks up where it stopped.</p></div>
+</div></div>
+
+<section id="how"><div class="narrow">
+  <h2>Three steps</h2>
+  <div class="step"><div class="num">1</div><div><h3>Create an account</h3>
+    <p>Pick a username with your invite code and confirm your email with a one-time code. No password. Your browser lives at <code>anywr.me/you</code>.</p></div></div>
+  <div class="step"><div class="num">2</div><div><h3>Sign in to your sites</h3>
+    <p>Open the live viewer and log in to what you use, just like on a new laptop. Tick "remember this device" when asked.</p></div></div>
+  <div class="step"><div class="num">3</div><div><h3>Hand it to your agent</h3>
+    <p>Create your agent link and add it to Claude as a custom connector (or <code>claude mcp add</code>). Then ask it to "check my grades" or "download last month's invoice".</p></div></div>
+  <a class="btn primary" href="/signup">Get started</a>
+</div></section>
+
+<div class="wrap"><div class="grid">
+  <div class="card subtle"><h3>One browser per person</h3>
+    <p>Each account gets its own container, network and profile. No other account, and no other agent link, can reach it.</p></div>
+  <div class="card subtle"><h3>No passwords anywhere</h3>
+    <p>You sign in to anywr with a code sent to your email. Your site logins are typed into the browser by you, never stored by anywr, and Chrome's password manager is off.</p></div>
+  <div class="card subtle"><h3>Revoke or delete any time</h3>
+    <p>Replacing the agent link kills the old one immediately. Deleting your account wipes the browser profile with it.</p></div>
+</div></div>
+
+<footer><div class="wrap bar">
+  <span>anywr — beta</span><div class="grow"></div><a href="/login">Sign in</a>
+</div></footer>
+</body>
+</html>

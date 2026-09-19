@@ -1,0 +1,36 @@
+// Verify the Access JWT ourselves rather than trusting the email header:
+// if the Access app were ever misconfigured, a header is spoofable, a signature isn't.
+const enc = (s) => new TextEncoder().encode(s);
+const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64url = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+
+async function accessEmail(req, env) {
+  const jwt = req.headers.get("cf-access-jwt-assertion");
+  if (!jwt) return null;
+  const [h, p, sig] = jwt.split(".");
+  const header = JSON.parse(new TextDecoder().decode(unb64url(h)));
+  const { keys } = await (await fetch(`${env.TEAM}/cdn-cgi/access/certs`, { cf: { cacheTtl: 3600 } })).json();
+  const jwk = keys.find((k) => k.kid === header.kid);
+  if (!jwk || header.alg !== "RS256") return null;
+  const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  if (!(await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, unb64url(sig), enc(`${h}.${p}`)))) return null;
+  const c = JSON.parse(new TextDecoder().decode(unb64url(p)));
+  const aud = Array.isArray(c.aud) ? c.aud : [c.aud];
+  if (c.iss !== env.TEAM || !aud.includes(env.ACCESS_AUD) || c.exp < Date.now() / 1000) return null;
+  return c.email || null;
+}
+
+export default {
+  async fetch(req, env) {
+    const state = new URL(req.url).searchParams.get("state") || "";
+    if (!/^[A-Za-z0-9_-]{20,64}$/.test(state)) return new Response("Start signing in from anywr.me.", { status: 400 });
+    const email = await accessEmail(req, env);
+    if (!email) return new Response("Not verified by Cloudflare Access.", { status: 403 });
+    const body = b64url(enc(JSON.stringify({ e: email, s: state, x: Math.floor(Date.now() / 1000) + 120 })));
+    const key = await crypto.subtle.importKey("raw", enc(env.SSO_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const sig = b64url(await crypto.subtle.sign("HMAC", key, enc(body)));
+    // Fixed destination: the state is the only thing the caller controls.
+    return Response.redirect(`${env.RETURN_URL}?t=${body}.${sig}`, 302);
+  },
+};
