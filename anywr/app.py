@@ -684,6 +684,17 @@ async def plain(send, status, msg):
     await send({"type": "http.response.body", "body": body})
 
 
+class RedactTokens(logging.Filter):
+    """The agent link is the whole credential; keep it out of the access log."""
+    def filter(self, record):
+        if isinstance(record.args, tuple) and len(record.args) > 2 and str(record.args[2]).startswith("/mcp/"):
+            record.args = (*record.args[:2], "/mcp/<token>", *record.args[3:])
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(RedactTokens())
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["invite"]:
         with conn() as c:

@@ -7,6 +7,7 @@ auth/index.js signs them.
     DB=/tmp/anywr-test.db python test_app.py
 """
 import base64
+import logging
 import hmac
 import json
 import os
@@ -136,5 +137,10 @@ with new_client() as c:
     c2.post("/api/logout")
     assert c2.get("/api/session").json()["user"] is None
     assert c2.post("/api/browser/start").status_code == 401
+
+rec = logging.LogRecord("uvicorn.access", 20, "", 0, '%s - "%s %s HTTP/%s" %d',
+                        ("1.2.3.4:0", "POST", "/mcp/" + "A" * 43, "1.1", 200), None)
+A.RedactTokens().filter(rec)
+assert "A" * 43 not in rec.getMessage() and "/mcp/<token>" in rec.getMessage()
 
 print("ok")
