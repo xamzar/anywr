@@ -47,6 +47,19 @@ services:
       - ./src:/app/src:ro
       - ./config:/app/config:ro
 
+  # M1 digest kernel: view / click / fill over one browser. Deliberately NOT
+  # network_mode: service:soak -- it talks to work over the default network, so
+  # nothing here can reach the experiment's Chrome. No /data mount either: with
+  # no soak.db in reach it cannot write AGENT_ACTION even by accident.
+  # No published port; it is spoken to over `docker compose exec` on stdio.
+  kernel:
+    build: { context: ., dockerfile: docker/mcp.Dockerfile }
+    restart: unless-stopped
+    environment: { KERNEL_CDP: "work:9223" }
+    command: ["python", "-m", "kernel.server"]
+    volumes:
+      - ./src:/app/src:ro
+
   # Front door for mcp-hub's Caddy (mcp.xmzr.dev/ws/*). Bound to the VPC
   # address only; no firewall rule opens 8090 to the internet.
   gateway:
