@@ -1,0 +1,21 @@
+services:
+  soak:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    restart: unless-stopped
+    env_file: config/.env
+    # Chrome's own sandbox needs to create namespaces; Docker's default seccomp
+    # profile forbids that. This keeps the sandbox on instead of --no-sandbox.
+    security_opt: [seccomp=unconfined]
+    shm_size: 1gb
+    stop_grace_period: 60s
+    ports: ["127.0.0.1:6080:6080"]   # noVNC, reachable only through the SSH tunnel
+    volumes:
+      - profile:/profile
+      - ./data:/data
+      # Code is mounted, not only baked in, so a probe fix after T0 needs no
+      # rebuild -- a rebuild restarts Chrome and would be an unplanned cycle.
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+      - ./tests:/app/tests:ro
+volumes:
+  profile:

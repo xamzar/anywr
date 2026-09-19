@@ -1,0 +1,76 @@
+# The only place a site is described. Adding a target = adding a block here.
+# Signal kinds: selector | url_contains | url_prefix | text (case-insensitive).
+# A signal may be one matcher or a list (any match wins).
+# Priority: AUTHED > CHALLENGED > LOGGED_OUT; nothing matched -> ERROR (unclassified).
+#
+# Matchers marked "verify at T0" are best guesses; check the first probe's
+# screenshots after login and tighten them before the clock really starts.
+
+- name: aims
+  tier: 1
+  # Kicks off the SAML round trip to Okta; with a live Okta session it lands
+  # straight back inside Banner. Banner's own session idles out in ~30 min, so
+  # what this measures is the Okta (auth.cityu.edu.hk) session, not Banner's.
+  authed_url: "https://banweb.cityu.edu.hk/pls/PROD/twgkpswd_cityu.P_WWWLogin"
+  authed_signal: { kind: selector, value: 'a[href*="P_Logout"]' }   # the "Exit" link, verified 2026-09-19
+  challenge_signal:   # verify at T0
+    - { kind: text, value: "push notification" }
+    - { kind: text, value: "Enter a code" }
+    - { kind: text, value: "Verify with" }
+  loggedout_signal:
+    - { kind: url_contains, value: "auth.cityu.edu.hk" }
+    - { kind: text, value: "user login" }
+    - { kind: text, value: "session has timed out" }
+  cookie_domains: ["cityu.edu.hk"]
+
+- name: canvas
+  tier: 1
+  authed_url: "https://canvas.cityu.edu.hk/profile"
+  authed_signal: { kind: selector, value: "#global_nav_profile_link" }
+  challenge_signal:   # verify at T0
+    - { kind: text, value: "push notification" }
+    - { kind: text, value: "Enter a code" }
+    - { kind: text, value: "Verify with" }
+  loggedout_signal:
+    - { kind: url_contains, value: "auth.cityu.edu.hk" }
+    - { kind: url_contains, value: "/login" }
+  cookie_domains: ["canvas.cityu.edu.hk", "cityu.edu.hk"]
+
+- name: google
+  tier: 2
+  authed_url: "https://myaccount.google.com/"
+  # Logged out, myaccount redirects to www.google.com/account/about, whose page
+  # also carries "Google Account" links -- so the URL is the only honest signal.
+  authed_signal: { kind: url_prefix, value: "https://myaccount.google.com/" }
+  challenge_signal:
+    - { kind: url_contains, value: "/challenge/" }
+    - { kind: text, value: "Verify it" }
+  loggedout_signal:
+    - { kind: url_contains, value: "accounts.google.com" }
+    - { kind: url_contains, value: "/account/about" }
+  cookie_domains: ["google.com"]
+
+- name: github
+  tier: 2
+  authed_url: "https://github.com/settings/profile"
+  authed_signal: { kind: selector, value: 'meta[name="user-login"]:not([content=""])' }
+  challenge_signal:
+    - { kind: url_contains, value: "/sessions/verified-device" }
+    - { kind: url_contains, value: "/sessions/two-factor" }
+    - { kind: text, value: "Device verification" }
+  loggedout_signal:
+    - { kind: url_prefix, value: "https://github.com/login" }
+    - { kind: url_prefix, value: "https://github.com/session" }
+  cookie_domains: ["github.com"]
+
+- name: linkedin
+  tier: 2
+  authed_url: "https://www.linkedin.com/feed/"
+  authed_signal: { kind: url_prefix, value: "https://www.linkedin.com/feed" }
+  challenge_signal: { kind: url_contains, value: "/checkpoint/" }
+  loggedout_signal:
+    - { kind: url_contains, value: "/authwall" }
+    - { kind: url_contains, value: "/login" }
+    - { kind: url_contains, value: "/uas/" }
+    - { kind: url_contains, value: "/signup" }
+  cookie_domains: ["linkedin.com"]

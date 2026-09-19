@@ -1,0 +1,4 @@
+# Host cron for the soak rig (install: crontab scripts/crontab). All times UTC.
+0 */6 * * * cd /home/xmzr/workspace-hub && docker compose exec -T soak python src/probe.py >> logs/probe.log 2>&1
+0 23 * * *  cd /home/xmzr/workspace-hub && docker compose exec -T soak python src/notify.py >> logs/notify.log 2>&1
+30 2 * * *  /home/xmzr/workspace-hub/scripts/cycle.sh >> /home/xmzr/workspace-hub/logs/cycle.log 2>&1
