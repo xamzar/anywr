@@ -1,15 +1,26 @@
-"""FastMCP wiring for the kernel: seven tools over one browser.
+"""FastMCP wiring for the kernel: ten base tools over one browser, plus one tool
+per promoted adapter.
 
 One browser, one page, and no `workspace` argument anywhere: the CDP target is
 configuration (KERNEL_CDP), not something the model picks. The surface stays
 small on purpose -- no open(), no evaluate(), no screenshot -- so what M1
 measured is the kernel and not a smaller Playwright server.
 
+An adapter is registered as its own tool rather than reached through a
+run_adapter(name) dispatcher. Three reasons, in order of weight: the model sees
+`aims_grades()` in its tool list and never has to be told an adapter exists; an
+adapter that types into a field needs its own typed arguments and a dispatcher
+can only offer a bag of strings; and a dispatcher's first argument is a name the
+model chooses, which is precisely the shape that lets a wrong name reach the
+wrong thing. Here a name is resolved once, at registration, against a set that
+already refused every base tool's name.
+
 Not in here, deliberately: no db, no AGENT_ACTION logging. The kernel is not
 part of the soak experiment.
 """
 import argparse
 import asyncio
+import inspect
 import logging
 import os
 import sys
@@ -18,14 +29,14 @@ import traceback
 from fastmcp import FastMCP
 from playwright.async_api import async_playwright
 
-from kernel import base, digest
+from kernel import adapters, base, digest, replay
 
 log = logging.getLogger("kernel.server")
 
 DEFAULT_CDP = "work:9223"
 
 mcp = FastMCP("kernel", instructions=(
-    "One browser, one page, seven tools. view() returns the page as a numbered list of the "
+    "One browser, one page. view() returns the page as a numbered list of the "
     "elements you can act on; click(ref), fill(ref, value) and select(ref, option) take one of "
     "those numbers and return the page's new digest. A ref only means anything against the "
     "digest it came from — any change to the page renumbers them, so act on the most recent "
@@ -36,7 +47,12 @@ mcp = FastMCP("kernel", instructions=(
     "something is missing or empty. This browser belongs to a person who can see it and take "
     "it over: when you meet a password, a 2FA prompt or a captcha, do not guess and do not "
     "give up — call handoff(reason), which asks them to do that step and blocks until they "
-    "have."))
+    "have. Exploring a path is expensive and repeating it should be free: when you have found "
+    "a route worth keeping, walk it once with record(true), then export_adapter() turns it "
+    "into a tool of its own that replays it and returns typed rows with no digests in "
+    "between. Any tool here that is not one of the ten named above is such an adapter — "
+    "prefer it to walking the path by hand, and if it comes back wrong call verify(name), "
+    "which says whether the site changed or you are merely signed out."))
 
 # One page can only do one thing at a time, so the lock covers whole tool calls
 # rather than just the connect: a click landing between another call's view()
@@ -97,7 +113,11 @@ async def _run(name, op, *, secret=None):
     async with _lock:
         try:
             return await op(await _attach())
-        except base.KernelError as exc:
+        except (base.KernelError, adapters.AdapterError) as exc:
+            # Both are written for the model to read and act on. AdapterError is
+            # not a subclass of KernelError only because adapters.py is kept
+            # free of playwright so the guardrails stay testable without a
+            # browser; they are the same contract and get the same handling.
             return str(exc)
         except Exception as exc:  # noqa: BLE001 - the model gets a result, never a stack trace
             _kernel = None
@@ -218,6 +238,237 @@ async def handoff(reason: str) -> str:
     return await _run("handoff", lambda k: k.handoff(reason))
 
 
+# --- promotion ----------------------------------------------------------------
+
+async def _sync(value):
+    """record() is the one tool with nothing to await. It still goes through
+    _run() so it takes the same lock as everything else: the recorder is state
+    on the Kernel, and turning it on halfway through another call's click is the
+    same race base.py refuses to guess about."""
+    return value
+
+
+@mcp.tool
+async def record(on: bool) -> str:
+    """Start (true) or stop (false) recording the path you are walking.
+
+    While it is on, every click(), fill() and select() that *succeeds* is kept
+    as a step. What is kept is the element's role and name — the same pair
+    view() showed you and click() checks before it acts — and never the ref,
+    which is only a position and means nothing on the next page load. A fill's
+    value is never kept: it becomes an argument of the tool this turns into.
+
+    record(true) starts a fresh recording and discards any earlier one. Walk the
+    path once, from a page you could get back to, then record(false) and
+    export_adapter(). A fill into a password field is deliberately not recorded
+    and blocks the export — an adapter must not type a credential, so use
+    handoff() for the sign-in and record only what comes after it.
+    """
+    return await _run("record", lambda k: _sync(k.record(on)))
+
+
+@mcp.tool
+async def export_adapter(name: str, description: str, fields: dict[str, int],
+                         selector: str | None = None,
+                         types: dict[str, str] | None = None) -> dict:
+    """Promote what you just recorded into a tool of its own that returns rows.
+
+    Call this while the browser is still on the page the path ends at — the
+    table is read from the page in front of you to prove the adapter works
+    before anything is written.
+
+    `name` becomes both a filename and a tool name: 3–41 characters,
+    `^[a-z][a-z0-9_]{2,40}$`, and never the name of one of the base tools.
+    `description` is what the new tool's own docstring will say.
+    `fields` maps each column you want to its position in the table row, counting
+    from 0 — `{"course": 0, "title": 1, "grade": 3}`. read() shows you the rows
+    as text, which is how you count them.
+    `selector` is the CSS selector of the table; leave it out and the page's
+    largest data table is used.
+    `types` optionally makes a column an `int` or a `float` instead of `str`.
+
+    Returns the path written, the tool's arguments, and the first rows it
+    extracted, so you can see immediately whether the columns are the ones you
+    meant. From here on, call that tool instead of walking the path.
+    """
+    res = await _run("export_adapter",
+                     lambda k: _export(k, name, description, fields, selector, types))
+    return _as_dict(res, "export_adapter")
+
+
+async def _export(kernel, name, description, fields, selector, types):
+    # The name first, before anything about the recording: a refused name is the
+    # refusal that matters most, and telling the model its recording is empty
+    # when its real problem is that it tried to call an adapter `view` sends it
+    # to fix the wrong thing.
+    adapters.validate_name(name)
+    steps, dropped = kernel.recording()
+    if dropped:
+        raise adapters.AdapterError(
+            f"{dropped} fill(s) into a password field were left out of this recording, so the "
+            "path has a hole in it and exporting would promote a route that cannot work. An "
+            "adapter may not type a credential. Use handoff() for the sign-in and record only "
+            "the part after it.")
+    if not steps:
+        raise adapters.AdapterError(
+            "nothing has been recorded. Call record(true), walk the path with click(), fill() "
+            "and select(), then call this again — an adapter with no steps would extract from "
+            "whatever page happened to be open.")
+    if not selector:
+        best = await kernel.best_table()
+        if not best:
+            raise adapters.AdapterError(
+                "this page has no table to extract from, and no selector was given. Get to the "
+                "page the data is on before exporting, or pass the selector yourself.")
+        selector, found = best
+        log.info("export_adapter %s: chose %s (%d rows)", name, selector, found)
+    spec = adapters.from_recording(
+        name, description, steps,
+        {"kind": "table", "selector": selector, "fields": fields or {}}, types)
+
+    # Prove it on the page it was built from, before it is written. An adapter
+    # that extracts nothing on day one is not worth the file, and finding that
+    # out now costs one evaluate instead of a debugging session next week.
+    try:
+        rows, short = await replay.extract(kernel, spec)
+    except adapters.AdapterError as exc:
+        raise adapters.AdapterError(
+            f"{exc} Nothing was written. Check `fields` against what read() shows you on this "
+            "page, or pass `selector` for the table you actually mean.") from exc
+    if not rows:
+        raise adapters.AdapterError(
+            f"{selector!r} gave no rows this adapter could read on the page it was just built "
+            "from, so it would be broken the moment it was written. Nothing was written.")
+
+    path = adapters.save(spec)
+    register(spec)
+    log.info("export_adapter wrote %s (%d steps)", path, len(spec["steps"]))
+    return {"ok": True, "adapter": name, "path": path, "steps": len(spec["steps"]),
+            "selector": selector, "arguments": spec.get("params", []),
+            "columns": list(spec["extract"]["fields"]), "sample": rows[:replay.SAMPLE],
+            "skipped_rows": short,
+            "note": f"{name}() is registered now and returns these rows without a digest. "
+                    "The recording is still held, so you can export a second view of the same "
+                    "path under another name."}
+
+
+@mcp.tool
+async def verify(name: str) -> dict:
+    """Re-run a promoted adapter and say whether it still works.
+
+    Sites change, and an adapter that quietly returns nothing is worse than one
+    that fails loudly. Run this from the page the adapter starts on — it replays
+    from wherever the browser already is.
+
+    `verdict` is one of:
+      OK          — rows came back, with a sample of them.
+      BROKEN      — it failed on a page that proves it is signed in, so the site
+                    has changed. `failed_at` says which step.
+      LOGGED_OUT  — it failed, but the session is signed out, so this says
+                    nothing about the adapter. Call handoff(), then verify again.
+      UNCONFIRMED — it failed and the page carries no evidence either way. A
+                    timed-out portal serves a page that looks entirely normal, so
+                    this is not the same as BROKEN and must not be debugged as if
+                    it were.
+    """
+    try:
+        spec = adapters.load(name)
+    except adapters.AdapterError as exc:
+        return {"adapter": name, "verdict": "UNCONFIRMED", "error": str(exc),
+                "detail": "nothing was replayed, so this is about the adapter file rather "
+                          "than the site."}
+    return _as_dict(await _run("verify", lambda k: replay.verify(k, spec)), "verify")
+
+
+def _as_dict(res, name):
+    """_run() answers a KernelError with the line written for the model. These
+    tools answer in objects, so a line becomes one rather than a type surprise."""
+    return res if isinstance(res, dict) else {"ok": False, "adapter": name, "error": res}
+
+
+# --- adapters as tools ---------------------------------------------------------
+
+def _doc(spec):
+    """The promoted tool's own instructions. Written for the model, like the
+    base tools' -- what it returns, and what to do when it stops working."""
+    columns = ", ".join(f"{k} ({t})" for k, t in spec["returns"][0].items())
+    args = (f" Takes {', '.join(spec['params'])}, which it types into the fields on the way."
+            if spec.get("params") else "")
+    return (f"{spec['description']}\n\n"
+            f"Replays a path that was recorded once through this browser and returns typed "
+            f"rows: {columns}.{args} It costs you no digests — call it instead of walking the "
+            f"pages by hand. It replays from wherever the browser already is, so get to the "
+            f"page it starts from first.\n\n"
+            f"If it comes back with `ok: false`, or with no rows, read `note` before assuming "
+            f"the adapter is wrong: a signed-out session serves pages that look entirely "
+            f"normal. verify('{spec['name']}') draws that line properly.")
+
+
+def _adapter_tool(spec):
+    """A callable with this adapter's own name, signature and docstring."""
+    name = spec["name"]
+    params = spec.get("params", [])
+
+    async def fn(**values):
+        return _as_dict(await _run(name, lambda k: replay.run_tool(k, spec, values)), name)
+
+    fn.__name__ = name
+    fn.__doc__ = _doc(spec)
+    fn.__signature__ = inspect.Signature(
+        [inspect.Parameter(p, inspect.Parameter.KEYWORD_ONLY, annotation=str) for p in params],
+        return_annotation=dict)
+    fn.__annotations__ = {p: str for p in params} | {"return": dict}
+    return fn
+
+
+def register(spec):
+    """Give this adapter its own tool, replacing an earlier version of itself.
+
+    The reserved-name check is made again here even though validate() already
+    made it. This is the one function that can add a name to the live tool
+    registry, and a guarantee about the base tools should not rest on every
+    caller having gone through the right door.
+    """
+    name = spec["name"]
+    if name in adapters.RESERVED:
+        raise adapters.AdapterError(f"{name!r} is a base tool and cannot be registered")
+    try:
+        mcp.local_provider.remove_tool(name)   # a re-export replaces, never shadows
+    except Exception:  # noqa: BLE001 - not registered yet is the normal case
+        pass
+    mcp.tool(_adapter_tool(spec))
+    return name
+
+
+def register_adapters():
+    """Every adapter on the volume, at startup. Returns (registered, problems).
+
+    A file that fails validation is skipped with a loud line and nothing else.
+    One bad adapter must not cost the other nine and the ten base tools, and a
+    server that refuses to start is a crash loop nobody reads.
+    """
+    specs, problems = adapters.load_all()
+    for entry, why in problems:
+        log.error("ADAPTER SKIPPED %s — %s", entry, why)
+    done = []
+    for spec in specs:
+        try:
+            done.append(register(spec))
+        except Exception as exc:  # noqa: BLE001 - startup survives anything in a spec
+            problems.append((spec.get("name", "?"), str(exc)))
+            log.error("ADAPTER SKIPPED %s — could not be registered: %s", spec.get("name"), exc)
+    log.info("adapters: %d promoted (%s), %d skipped", len(done), ", ".join(done) or "none",
+             len(problems))
+    return done, problems
+
+
+try:
+    register_adapters()
+except Exception as exc:  # noqa: BLE001 - the base tools come up whatever is on the volume
+    log.error("adapters could not be loaded at all (%s: %s) — the base tools are unaffected",
+              type(exc).__name__, exc)
+
+
 # --- transports -------------------------------------------------------------
 # One server definition, two ways in: http is the deployed path, stdio is what
 # Claude Desktop attaches to over an SSH tunnel.
@@ -227,10 +478,16 @@ def main(argv=None):
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     ap = argparse.ArgumentParser(
         description="MCP kernel: view / click / fill / select / read / session_status / "
-                    "handoff over one browser")
+                    "handoff / record / export_adapter / verify over one browser, plus one "
+                    "tool per promoted adapter")
     ap.add_argument("--transport", choices=("http", "stdio"),
                     default=os.environ.get("KERNEL_TRANSPORT", "http"))
     args = ap.parse_args(argv)
+    # Again, now that logging is configured: the import-time pass keeps
+    # list_tools() honest for anything that mounts this module without calling
+    # main(), but its "ADAPTER SKIPPED" lines would have gone to a handler that
+    # did not exist yet, and a loud line nobody can see is not a loud line.
+    register_adapters()
     if args.transport == "stdio":
         # stdout is the protocol here: logs went to stderr above, banner off.
         asyncio.run(mcp.run_async(transport="stdio", show_banner=False))

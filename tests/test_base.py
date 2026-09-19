@@ -317,6 +317,23 @@ def test_base_owns_no_selector_of_its_own():
     assert "JS_CANDIDATES" in src and "JS_DESCRIBE" in src
 
 
+def test_digest_is_the_only_module_that_holds_javascript():
+    """The generalised form of the rule above, which M5's table read made worth
+    stating: one file to read to know everything the kernel runs inside a page
+    it does not own. session.py's password probe and base.py's two one-liners
+    over an already-resolved element are the named exceptions."""
+    from pathlib import Path
+    # session.py's password probe is the one other page query; control.py's
+    # JavaScript is in a page it serves itself, not injected into someone's.
+    allowed = {"digest.py", "session.py", "control.py"}
+    for f in sorted(Path("src/kernel").glob("*.py")):
+        if f.name in allowed:
+            continue
+        src = f.read_text()
+        assert "querySelector" not in src, f
+        assert "document." not in src, f
+
+
 # --- select -----------------------------------------------------------------
 # A native <select> is what Banner's Final Grades page picks a semester with,
 # and fill() correctly refuses it, so without this the task has no way forward.

@@ -61,6 +61,7 @@ services:
       KERNEL_CDP: "work:9223"
       KERNEL_STATE_FILE: "/state/handoff.json"
       KERNEL_VIEWER_URL: "https://mcp.xmzr.dev/ws/live/"
+      KERNEL_ADAPTERS_DIR: "/state/adapters"   # promoted tools; /state is the only writable path
     command: ["python", "-m", "kernel.server"]
     volumes:
       - ./src:/app/src:ro

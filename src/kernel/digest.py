@@ -5,6 +5,13 @@ numbering and the token cap are testable without a browser. extract_elements()
 is the only part that touches Playwright and it makes no formatting decisions,
 so the two move independently and the expensive half needs no browser to test.
 
+This is also the only module that holds JavaScript. base.py imports every
+snippet it sends into a page from here rather than keeping copies: a second copy
+of the candidate query is how the extractor and the resolver drift apart, and
+drift is a silent wrong click. The rule generalised once M5's adapters needed a
+table read, and it is worth more as a rule than as a special case -- one file to
+read to know everything that runs inside a page the kernel does not own.
+
 Not in here, deliberately: no CDP, no MCP, no db. The kernel is not part of the
 soak experiment and logs no AGENT_ACTION events.
 """
@@ -267,6 +274,12 @@ JS_DESCRIBE = """els => {
 _JS = f"() => ({JS_DESCRIBE})(({JS_CANDIDATES})())"
 
 
+# The page's visible text. view() counts it, read() quotes it and
+# session_status() searches it, and all three want the same string: three copies
+# of this line is three chances for "the text" to mean three things.
+JS_TEXT = "() => document.body ? document.body.innerText : ''"
+
+
 async def extract_elements(page):
     """Raw {role, name} dicts off a live page, in document order.
 
@@ -279,6 +292,67 @@ async def extract_elements(page):
 
 async def digest_page(page, *, max_tokens=DEFAULT_MAX_TOKENS):
     """view()'s body: a live page in, a digest out."""
-    text = await page.evaluate("() => document.body ? document.body.innerText : ''")
+    text = await page.evaluate(JS_TEXT)
     return build_digest(page.url, await page.title(), await extract_elements(page),
                         text=text, max_tokens=max_tokens)
+
+
+# --- tables -----------------------------------------------------------------
+# An adapter's payload is a table, and these are the two things it needs from a
+# page. They live here for the same reason JS_CANDIDATES does: this file is the
+# only one that holds JavaScript, so there is exactly one place to read to know
+# everything the kernel ever sends into a page. tests/test_base.py enforces it.
+#
+# The selector arrives as an *argument* to a fixed function, and the function
+# uses document.querySelector, which is CSS and only CSS. It never reaches
+# Playwright's selector engines, so an adapter's selector cannot be `text=`, a
+# registered engine, or anything that evaluates. There is no path from a spec
+# file to a string that runs.
+
+JS_TABLE = """([sel, skip]) => {
+  let t;
+  try { t = document.querySelector(sel); } catch (e) { return {error: 'selector'}; }
+  if (!t) return {error: 'missing'};
+  // Rows of *this* table, not of the tables nested inside it: Banner lays its
+  // pages out in tables, so a plain descendant query would fold a layout
+  // wrapper's grandchildren into the data table's rows.
+  const rows = [...t.querySelectorAll('tr')].filter(r => r.closest('table') === t);
+  return {rows: rows.slice(skip)
+    .filter(r => r.querySelector('td'))   // a row of only <th> is a header, not data
+    .map(r => [...r.querySelectorAll('td, th')]
+      .map(c => (c.innerText || '').replace(/\\s+/g, ' ').trim()))};
+}"""
+
+# A selector for the table with the most data rows of its own. export_adapter()
+# needs it because the model has never seen this page's HTML -- the kernel gives
+# it no way to -- so asking it to guess a selector would be asking it to guess.
+JS_BEST_TABLE = """() => {
+  const one = s => {
+    try { return document.querySelectorAll(s).length === 1; } catch (e) { return false; }
+  };
+  const name = el => {
+    if (el.id && one('#' + CSS.escape(el.id))) return '#' + CSS.escape(el.id);
+    for (const c of el.classList) {
+      const s = el.tagName.toLowerCase() + '.' + CSS.escape(c);
+      if (one(s)) return s;
+    }
+    // Nothing unique to hold on to, so fall back to position. Brittler, and
+    // that is what verify() is for.
+    const part = e => {
+      const tag = e.tagName.toLowerCase();
+      const sibs = [...(e.parentElement ? e.parentElement.children : [])]
+        .filter(x => x.tagName === e.tagName);
+      return sibs.length > 1 ? tag + ':nth-of-type(' + (sibs.indexOf(e) + 1) + ')' : tag;
+    };
+    const path = [];
+    for (let e = el; e && e.tagName !== 'HTML'; e = e.parentElement) path.unshift(part(e));
+    return path.join(' > ');
+  };
+  let best = null, most = 0;
+  for (const t of document.querySelectorAll('table')) {
+    const n = [...t.querySelectorAll('tr')]
+      .filter(r => r.closest('table') === t && r.querySelector('td')).length;
+    if (n > most) { most = n; best = t; }
+  }
+  return best ? {selector: name(best), rows: most} : null;
+}"""

@@ -59,9 +59,19 @@ def tool_names():
     return {t.name for t in asyncio.run(server.mcp.list_tools())}
 
 
-def test_the_tool_set_is_exactly_the_seven_base_tools():
+def test_the_tool_set_is_exactly_the_base_tools():
+    """M5 added three — record, export_adapter, verify — and nothing else. Any
+    further name in this list is a promoted adapter, which on a machine with no
+    /state volume means the list has grown by accident."""
     assert tool_names() == {"view", "click", "fill", "select", "session_status", "read",
-                            "handoff"}
+                            "handoff", "record", "export_adapter", "verify"}
+
+
+def test_every_base_tool_name_is_reserved_against_adapters():
+    """The frozen set is what an adapter is measured against, so it has to cover
+    the surface that actually exists rather than the one it was written for."""
+    from kernel import adapters
+    assert tool_names() <= adapters.RESERVED
 
 
 def test_the_tools_m1_cut_are_absent():
@@ -80,9 +90,19 @@ def test_no_tool_takes_a_workspace():
 
 
 def test_the_instructions_and_docstrings_teach_the_ref_model():
+    """Every tool that takes a ref has to say where refs come from and when they
+    stop being true. M5's three take none — record() explains what it keeps
+    *instead* of a ref, and export_adapter() and verify() never see one — so the
+    rule is about the parameter, not about every docstring."""
     assert "view()" in server.mcp.instructions and "ref" in server.mcp.instructions
+    took_one = 0
     for t in asyncio.run(server.mcp.list_tools()):
-        assert "ref" in t.description, t.name
+        if "ref" in t.parameters.get("properties", {}):
+            assert "most recent digest" in t.description, t.name
+            took_one += 1
+        # The docstrings are the model's instructions here, not API notes.
+        assert len(t.description) > 200, t.name
+    assert took_one == 3, "click, fill and select take a ref"
 
 
 # --- a real browser on a real CDP port --------------------------------------
