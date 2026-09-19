@@ -1,9 +1,9 @@
-"""FastMCP wiring for the kernel: five tools over one browser.
+"""FastMCP wiring for the kernel: seven tools over one browser.
 
 One browser, one page, and no `workspace` argument anywhere: the CDP target is
-configuration (KERNEL_CDP), not something the model picks. Five tools are the
-whole surface on purpose -- no open(), no evaluate(), no screenshot -- so what
-M1 measures is the kernel and not a smaller Playwright server.
+configuration (KERNEL_CDP), not something the model picks. The surface stays
+small on purpose -- no open(), no evaluate(), no screenshot -- so what M1
+measured is the kernel and not a smaller Playwright server.
 
 Not in here, deliberately: no db, no AGENT_ACTION logging. The kernel is not
 part of the soak experiment.
@@ -25,7 +25,7 @@ log = logging.getLogger("kernel.server")
 DEFAULT_CDP = "work:9223"
 
 mcp = FastMCP("kernel", instructions=(
-    "One browser, one page, five tools. view() returns the page as a numbered list of the "
+    "One browser, one page, seven tools. view() returns the page as a numbered list of the "
     "elements you can act on; click(ref), fill(ref, value) and select(ref, option) take one of "
     "those numbers and return the page's new digest. A ref only means anything against the "
     "digest it came from — any change to the page renumbers them, so act on the most recent "
@@ -33,7 +33,10 @@ mcp = FastMCP("kernel", instructions=(
     "navigate by URL: the browser starts on whatever page it is already showing, and you move "
     "by clicking. session_status() answers the one question a digest cannot: a timed-out "
     "session can serve a page that looks entirely normal, so ask it before reporting that "
-    "something is missing or empty."))
+    "something is missing or empty. This browser belongs to a person who can see it and take "
+    "it over: when you meet a password, a 2FA prompt or a captcha, do not guess and do not "
+    "give up — call handoff(reason), which asks them to do that step and blocks until they "
+    "have."))
 
 # One page can only do one thing at a time, so the lock covers whole tool calls
 # rather than just the connect: a click landing between another call's view()
@@ -85,6 +88,10 @@ async def _run(name, op, *, secret=None):
     and returning the traceback would spend the model's context on something it
     cannot act on -- so the traceback goes to the log, the model gets one line,
     and the cached connection is dropped because it is the prime suspect.
+
+    The lock is held for the whole call, handoff() included. That is minutes,
+    deliberately: while the person is typing their password into this browser,
+    no other call has any business clicking in it.
     """
     global _kernel
     async with _lock:
@@ -187,6 +194,30 @@ async def read(contains: str | None = None) -> str:
     return await _run("read", lambda k: k.read(contains))
 
 
+@mcp.tool
+async def handoff(reason: str) -> str:
+    """Ask the person to take this browser over, and wait until they say they
+    are done.
+
+    Use this the moment you hit something only they can clear: a password, a
+    one-time code, a 2FA push, a captcha, a consent screen, a session that
+    session_status() calls LOGGED_OUT. Do not try to type a credential — you do
+    not have one — and do not report the task as impossible. Call this instead.
+
+    `reason` is shown to them on their phone and is the only thing telling them
+    what to do, so write it for a person: what is blocking you, and what you
+    need them to finish. It is not a place for a stack trace.
+
+    This call blocks — for minutes, until they press Done or it times out — and
+    then returns what happened followed by a fresh view() of wherever the page
+    has ended up. Takes no ref, and every ref you were holding is dead
+    afterwards: use the digest this returns. If it times out, read that digest
+    before deciding you are still stuck; they may have done the work and not
+    pressed the button.
+    """
+    return await _run("handoff", lambda k: k.handoff(reason))
+
+
 # --- transports -------------------------------------------------------------
 # One server definition, two ways in: http is the deployed path, stdio is what
 # Claude Desktop attaches to over an SSH tunnel.
@@ -195,7 +226,8 @@ def main(argv=None):
     logging.basicConfig(level=os.environ.get("KERNEL_LOG", "INFO").upper(), stream=sys.stderr,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     ap = argparse.ArgumentParser(
-        description="MCP kernel: view / click / fill / select / session_status over one browser")
+        description="MCP kernel: view / click / fill / select / read / session_status / "
+                    "handoff over one browser")
     ap.add_argument("--transport", choices=("http", "stdio"),
                     default=os.environ.get("KERNEL_TRANSPORT", "http"))
     args = ap.parse_args(argv)

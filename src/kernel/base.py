@@ -1,5 +1,5 @@
-"""The base tools: view / click / fill / select / session_status, over one
-already-running page.
+"""The base tools: view / click / fill / select / read / session_status /
+handoff, over one already-running page.
 
 A ref is a *position in the filtered list* digest.py produced, so it only means
 anything against the page state that produced it. Everything below exists to
@@ -18,7 +18,7 @@ import urllib.request
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
-from kernel import digest, session
+from kernel import digest, handoff, session
 
 log = logging.getLogger("kernel.base")
 
@@ -96,8 +96,8 @@ def _options_are(live, total):
 
 
 class Kernel:
-    """view / click / fill / select / session_status against one page, with the
-    last view() remembered."""
+    """view / click / fill / select / read / session_status / handoff against one
+    page, with the last view() remembered."""
 
     def __init__(self, page, *, max_tokens=digest.DEFAULT_MAX_TOKENS):
         self._page = page
@@ -231,6 +231,41 @@ class Kernel:
                 return head + "\n".join(kept) + f"\n({len(lines) - len(kept)} more lines — not shown)"
             kept.append(ln)
         return head + "\n".join(kept)
+
+    async def handoff(self, reason, **kw):
+        """Stop, let a human drive this browser, and pick the page up after them.
+
+        The only tool here that waits on a person. Everything else fails fast;
+        this one blocks, because a password prompt, a 2FA push or a captcha has
+        no machine answer and asking is the whole of the right response.
+
+        Takes no ref and returns a fresh view(), always. Whatever the human did,
+        they did it in this browser, so every ref from before this call is a
+        guess -- re-viewing is not a courtesy, it is the only honest thing to
+        return. The wait itself lives in handoff.py, which shares a file with
+        the control server because the Done button is in another process.
+        """
+        if not handoff.clean_reason(reason):
+            raise KernelError(
+                "handoff(reason) needs a reason — it is shown to the person on their phone "
+                "and is the only thing telling them what to do. Say what is blocking you and "
+                "what they should finish, e.g. 'sign in to AIMS: it wants your CityU password "
+                "and a Duo push'.")
+        try:
+            res = await handoff.wait(reason, **kw)
+        except OSError as exc:
+            # Nobody was asked, so waiting would have been theatre. This is a
+            # deployment fault (no /state volume), not a call to retry.
+            raise KernelError(
+                f"the handoff could not be recorded ({type(exc).__name__}: {exc}). The viewer "
+                f"reads {handoff.path()} to know you are waiting, so nobody would ever have "
+                "been shown your request. Nothing is blocked and nothing was handed over; "
+                "report this rather than retrying.") from exc
+        try:
+            return f"{res.message}\n\n{await self.view()}"
+        except Exception as exc:  # noqa: BLE001 - the outcome must survive a bad re-read
+            return (f"{res.message}\n\n(the page could not be read back afterwards: "
+                    f"{type(exc).__name__} — call view() yourself before acting.)")
 
     # --- ref resolution -----------------------------------------------------
     # The whole point of this module. Re-running JS_CANDIDATES is chosen over

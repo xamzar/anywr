@@ -508,3 +508,74 @@ def test_refs_from_before_a_navigation_are_refused(run):
 
     msg = run(go)
     assert "navigated" in msg and "view()" in msg
+
+
+# --- handoff ------------------------------------------------------------------
+# The wait itself is tests/test_handoff.py's; these are about what the Kernel
+# adds to it -- that the human's work is visible to the model afterwards.
+
+
+@pytest.fixture
+def state(tmp_path, monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setenv("KERNEL_STATE_FILE", str(tmp_path / "handoff.json"))
+    return tmp_path / "handoff.json"
+
+
+def test_handoff_returns_the_page_as_the_human_left_it(run, state):
+    """The human navigates while the agent waits, so the digest that comes back
+    has to be the page they ended on, not the one it was called from."""
+    from kernel import handoff as hs
+
+    async def go(page):
+        k = Kernel(page)
+        await k.view()
+
+        async def human():
+            for _ in range(500):
+                await asyncio.sleep(0.01)
+                if hs.read().pending:
+                    await page.goto((page.url.rsplit("/", 1)[0]) + "/next.html")
+                    return hs.done()
+
+        acted = asyncio.ensure_future(human())
+        out = await k.handoff("sign in", send=lambda t: True, timeout=2, poll=0.01)
+        await acted
+        return out
+
+    out = run(go)
+    assert "handoff complete" in out
+    assert "next.html" in out and "Back To Menu" in out   # the page they left
+    assert "Download" not in out                          # not the one it started on
+
+
+def test_a_timed_out_handoff_still_returns_a_digest_to_judge(run, state):
+    out = run(lambda page: Kernel(page).handoff("sign in", send=lambda t: True,
+                                                timeout=0.05, poll=0.01))
+    assert "timed out" in out and "menu.html" in out
+
+
+def test_handoff_refuses_an_empty_reason(run, state):
+    async def go(page):
+        with pytest.raises(KernelError) as err:
+            await Kernel(page).handoff("   ")
+        return str(err.value)
+
+    msg = run(go)
+    assert "reason" in msg and "phone" in msg
+
+
+def test_handoff_that_cannot_be_recorded_says_so_instead_of_waiting(run, monkeypatch, tmp_path):
+    """No /state volume means nobody is ever asked, so blocking for ten minutes
+    would be theatre. It is a deployment fault and the message says so."""
+    monkeypatch.setenv("KERNEL_STATE_FILE", str(tmp_path / "wall" / "handoff.json"))
+    (tmp_path / "wall").write_text("not a directory")
+
+    async def go(page):
+        with pytest.raises(KernelError) as err:
+            await Kernel(page).handoff("sign in", send=lambda t: True)
+        return str(err.value)
+
+    msg = run(go)
+    assert "could not be recorded" in msg and "handoff.json" in msg

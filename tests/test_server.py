@@ -1,4 +1,4 @@
-"""The MCP surface: five tools, real CDP, and nothing leaking out of fill().
+"""The MCP surface: seven tools, real CDP, and nothing leaking out of fill().
 
 The CDP half runs against a Chromium this file launches on localhost with
 --remote-debugging-port, so attach() is exercised for real -- /json/version,
@@ -59,17 +59,19 @@ def tool_names():
     return {t.name for t in asyncio.run(server.mcp.list_tools())}
 
 
-def test_the_tool_set_is_exactly_the_six_base_tools():
-    assert tool_names() == {"view", "click", "fill", "select", "session_status", "read"}
+def test_the_tool_set_is_exactly_the_seven_base_tools():
+    assert tool_names() == {"view", "click", "fill", "select", "session_status", "read",
+                            "handoff"}
 
 
 def test_the_tools_m1_cut_are_absent():
     """select() and read() both left this list on the live run: Final Grades is
     unreachable without select(), and the grades themselves are page text, so
-    view() could reach them and not report them. open() and evaluate() are still
-    cut by design, and the rest were never in M1's scope."""
+    view() could reach them and not report them. handoff() is M2's whole point
+    and joined in M2. open() and evaluate() are still cut by design, and the
+    rest were never in scope."""
     assert not tool_names() & {"open", "evaluate", "screenshot", "snapshot", "press",
-                               "close_tab", "workspaces", "handoff", "back"}
+                               "close_tab", "workspaces", "back"}
 
 
 def test_no_tool_takes_a_workspace():
@@ -268,3 +270,49 @@ def test_a_dropped_connection_is_re_attached_on_the_next_call(run):
     first, second = run(go)
     assert "failed unexpectedly" in first
     assert "menu.html" in second and server._kernel is not None
+
+
+# --- handoff ------------------------------------------------------------------
+# End to end through the MCP surface, with the control server's side of the file
+# written by hand. No network: with no TELEGRAM_* in the environment the sender
+# gives up before it builds a request.
+
+
+def test_handoff_through_the_tool_blocks_until_the_file_is_cleared(run, monkeypatch, tmp_path):
+    from kernel import handoff as hs
+
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setenv("KERNEL_STATE_FILE", str(tmp_path / "handoff.json"))
+    monkeypatch.setenv("KERNEL_HANDOFF_TIMEOUT", "5")
+    monkeypatch.setenv("KERNEL_HANDOFF_POLL", "0.01")
+
+    async def go(page):
+        async def control_server():
+            for _ in range(500):
+                await asyncio.sleep(0.01)
+                if hs.read().pending:
+                    return hs.done()
+            raise AssertionError("the handoff was never recorded")
+
+        pressed = asyncio.ensure_future(control_server())
+        res = await call("handoff", reason="sign in to AIMS")
+        await pressed
+        return res
+
+    res = run(go)
+    assert not res.is_error and "Traceback" not in res.data
+    assert "handoff complete" in res.data
+    assert "title: Menu" in res.data          # a fresh digest, as every acting tool returns
+
+
+def test_a_handoff_nobody_answers_is_a_readable_result_not_a_hang(run, monkeypatch, tmp_path):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.setenv("KERNEL_STATE_FILE", str(tmp_path / "handoff.json"))
+    monkeypatch.setenv("KERNEL_HANDOFF_TIMEOUT", "0.05")
+    monkeypatch.setenv("KERNEL_HANDOFF_POLL", "0.01")
+
+    res = run(lambda page: call("handoff", reason="finish the captcha"))
+    assert not res.is_error
+    assert "timed out" in res.data and "title: Menu" in res.data
