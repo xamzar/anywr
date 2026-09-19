@@ -19,7 +19,8 @@ x11vnc -display :99 -nopw -localhost -shared -forever -quiet -rfbport 5900 &
 websockify --web /usr/share/novnc 6080 localhost:5900 >/dev/null 2>&1 &
 
 # No --start-maximized: Chrome applies it to popups too, so the Google sign-in
-# window would open small and then blow up to full screen.
+# window would open small and then blow up to full screen. 860 leaves room for
+# fluxbox's titlebar (19px) and taskbar (20px); at 900 the top gets pushed off-screen.
 google-chrome-stable \
   --user-data-dir=/profile \
   --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 \
@@ -27,7 +28,7 @@ google-chrome-stable \
   --disable-renderer-backgrounding \
   --disable-background-timer-throttling \
   --no-first-run --no-default-browser-check \
-  --window-position=0,0 --window-size=1440,900 \
+  --window-position=0,0 --window-size=1440,860 \
   about:blank &
 CHROME=$!
 
