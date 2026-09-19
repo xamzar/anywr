@@ -47,7 +47,8 @@ services:
       - ./src:/app/src:ro
       - ./config:/app/config:ro
 
-  # M1 digest kernel: view / click / fill over one browser. Deliberately NOT
+  # M1 digest kernel: view / click / fill / select / session_status over one
+  # browser. Deliberately NOT
   # network_mode: service:soak -- it talks to work over the default network, so
   # nothing here can reach the experiment's Chrome. No /data mount either: with
   # no soak.db in reach it cannot write AGENT_ACTION even by accident.

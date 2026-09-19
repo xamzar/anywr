@@ -1,4 +1,5 @@
-"""view / click / fill against local fixture HTML. No test leaves the machine.
+"""view / click / fill / select / session_status against local fixture HTML.
+No test leaves the machine.
 
 Most of these are about one property: a ref reaches the element the digest named
 it for, or it reaches nothing at all.
@@ -30,12 +31,58 @@ NEXT = """<!doctype html><title>Second Page</title>
 <h1>Arrived</h1><a href="#b">Back To Menu</a>
 """
 
+# The shape of Banner's term page: a labelled dropdown whose labels and values
+# are different strings, plus a placeholder that cannot be chosen.
+FORM = """<!doctype html><title>Term Select</title>
+<label for="term">Term</label>
+<select id="term">
+  <option value="" disabled selected>None</option>
+  <option value="202630">Fall Semester 2026/27</option>
+  <option value="202710">Spring Semester 2026/27</option>
+</select>
+<label for="collide">Collision</label>
+<select id="collide">
+  <option value="A">B</option>
+  <option value="B">C</option>
+</select>
+<a href="#d" id="download">Download</a>
+"""
+
+# What the real portal served after 15 idle minutes: the menu still renders and
+# the sign-out link is still there. Only the title and one sentence differ.
+TIMEOUT = """<!doctype html><title>Session Timeout</title>
+<p>Your AIMS session has been timeout (15 minutes inactivity). Please re-enter
+your credentials to continue.</p>
+<a href="/pls/PROD/twbkwbis.P_GenMenu?name=bmenu.P_MainMnu">Student Services</a>
+<a href="/pls/PROD/twbkwbis.P_GenMenu?name=bmenu.P_AdminMnu">Personal Information</a>
+<a href="/pls/PROD/twbkwbis.P_Logout">Exit</a>
+"""
+
+SIGNIN = """<!doctype html><title>Sign In</title>
+<label for="u">Username</label><input id="u" type="text">
+<label for="p">Password</label><input id="p" type="password">
+<button>Sign In</button>
+"""
+
+# Signed in, and talking about logging in the whole way down. Also carries a
+# collapsed sign-in panel, which is in the DOM of plenty of signed-in pages.
+PROSE = """<!doctype html><title>Help — Accounts</title>
+<p>If you have forgotten your login, use the password reset link. Your login is
+your EID. A login attempt from a new device may ask you to verify it, and the
+session timeout for this service is documented in the IT handbook.</p>
+<a href="#reset">Password Reset</a>
+<div style="display:none"><label for="hp">Password</label><input id="hp" type="password"></div>
+<button onclick="window.__hit='Sign Out'">Sign Out</button>
+"""
+
 
 @pytest.fixture(scope="module")
 def pages(tmp_path_factory):
     d = tmp_path_factory.mktemp("kernel")
-    (d / "menu.html").write_text(MENU)
-    (d / "next.html").write_text(NEXT)
+    for name, html in (("menu.html", MENU), ("next.html", NEXT), ("form.html", FORM),
+                       ("timeout.html", TIMEOUT), ("signin.html", SIGNIN),
+                       ("prose.html", PROSE)):
+        (d / name).write_text(html)
     return d
 
 
@@ -190,12 +237,14 @@ def test_a_ref_that_is_not_a_number_is_a_clear_error(run):
     assert "whole number" in run(go)
 
 
-@pytest.mark.parametrize("act", ["click", "fill"])
+@pytest.mark.parametrize("act", ["click", "fill", "select"])
 def test_acting_before_any_view_is_refused(run, act):
     async def go(page):
         k = Kernel(page)
+        calls = {"click": lambda: k.click(1), "fill": lambda: k.fill(1, "x"),
+                 "select": lambda: k.select(1, "x")}
         with pytest.raises(KernelError) as err:
-            await (k.click(1) if act == "click" else k.fill(1, "x"))
+            await calls[act]()
         return str(err.value)
 
     assert "view()" in run(go)
@@ -266,6 +315,185 @@ def test_base_owns_no_selector_of_its_own():
     src = Path("src/kernel/base.py").read_text()
     assert "querySelectorAll" not in src
     assert "JS_CANDIDATES" in src and "JS_DESCRIBE" in src
+
+
+# --- select -----------------------------------------------------------------
+# A native <select> is what Banner's Final Grades page picks a semester with,
+# and fill() correctly refuses it, so without this the task has no way forward.
+
+
+def value_of(page, sel):
+    return page.evaluate(f"() => document.getElementById('{sel}').value")
+
+
+def test_the_digest_already_addresses_a_select(run):
+    """digest.INTERACTIVE carries `combobox` and JS_DESCRIBE maps SELECT to it,
+    so select() needed no new addressing -- checked, not assumed."""
+    d = run(lambda page: Kernel(page).view(), "form.html")
+    assert "combobox" in d and ref_of(d, "Term")
+
+
+def test_fill_still_refuses_a_dropdown_but_now_points_at_select(run):
+    """fill() was right to refuse a combobox and wrong to stop there: that
+    refusal is what left Final Grades unreachable."""
+    async def go(page):
+        k = Kernel(page)
+        d = await k.view()
+        with pytest.raises(KernelError) as err:
+            await k.fill(ref_of(d, "Term"), "Fall Semester 2026/27")
+        return str(err.value)
+
+    msg = run(go, "form.html")
+    assert "cannot be filled" in msg and "select(ref, option)" in msg
+
+
+def test_select_by_visible_label(run):
+    async def go(page):
+        k = Kernel(page)
+        d = await k.view()
+        after = await k.select(ref_of(d, "Term"), "Fall Semester 2026/27")
+        return after, await value_of(page, "term")
+
+    after, value = run(go, "form.html")
+    assert value == "202630"
+    assert "title: Term Select" in after and "Term" in after   # the new digest, like click()
+
+
+def test_select_by_underlying_value(run):
+    async def go(page):
+        k = Kernel(page)
+        d = await k.view()
+        await k.select(ref_of(d, "Term"), "202710")
+        return await value_of(page, "term")
+
+    assert run(go, "form.html") == "202710"
+
+
+def test_a_label_beats_a_value_when_the_two_collide(run):
+    """Documented: label first, value second. Option 1 is <option value="A">B</option>
+    and option 2 is <option value="B">C</option>, so "B" is option 1's label and
+    option 2's value. Playwright's own select_option() would take whichever came
+    first in the document; here the label wins because the label is what the
+    digest showed."""
+    async def go(page):
+        k = Kernel(page)
+        d = await k.view()
+        await k.select(ref_of(d, "Collision"), "B")
+        return await value_of(page, "collide")
+
+    assert run(go, "form.html") == "A"
+
+
+def test_selecting_on_something_that_is_not_a_dropdown_is_a_clear_error(run):
+    async def go(page):
+        k = Kernel(page)
+        d = await k.view()
+        with pytest.raises(KernelError) as err:
+            await k.select(ref_of(d, "Download"), "Fall Semester 2026/27")
+        return str(err.value)
+
+    msg = run(go, "form.html")
+    assert "not a dropdown" in msg
+    assert "link" in msg and "Download" in msg     # says what the ref actually is
+    assert "click()" in msg and "fill()" in msg    # and what to use instead
+
+
+def test_an_option_that_does_not_exist_lists_the_options_that_do(run):
+    """The single likeliest failure on the real page: the model guesses a term
+    string. The error has to hand back the real ones."""
+    async def go(page):
+        k = Kernel(page)
+        d = await k.view()
+        with pytest.raises(KernelError) as err:
+            await k.select(ref_of(d, "Term"), "Semester A 2026")
+        return str(err.value)
+
+    msg = run(go, "form.html")
+    assert "Semester A 2026" in msg
+    assert "'Fall Semester 2026/27'" in msg and "'Spring Semester 2026/27'" in msg
+
+
+def test_a_disabled_option_is_not_offered_and_cannot_be_chosen(run):
+    async def go(page):
+        k = Kernel(page)
+        d = await k.view()
+        with pytest.raises(KernelError) as err:
+            await k.select(ref_of(d, "Term"), "None")
+        return str(err.value), await value_of(page, "term")
+
+    msg, value = run(go, "form.html")
+    assert "Its options are: 'Fall Semester 2026/27', 'Spring Semester 2026/27'." in msg
+    assert "(1 disabled option — not selectable)" in msg
+    assert value == ""
+
+
+def test_select_refuses_a_stale_ref_and_selects_nothing(run):
+    async def go(page):
+        k = Kernel(page)
+        d = await k.view()
+        stale = ref_of(d, "Term")
+        # A late-loading link above everything shifts every ref by one.
+        await page.evaluate("""() => {
+          const a = document.createElement('a');
+          a.href = '#c'; a.textContent = 'Cancel';
+          document.body.prepend(a);
+        }""")
+        with pytest.raises(KernelError) as err:
+            await k.select(stale, "Fall Semester 2026/27")
+        return str(err.value), await value_of(page, "term")
+
+    msg, value = run(go, "form.html")
+    assert value == "", "a refused select still changed the dropdown"
+    assert "changed" in msg and "view()" in msg and "Term" in msg
+
+
+# --- session_status ---------------------------------------------------------
+# The digest of an idled-out Banner session is indistinguishable from a live
+# one, so this is the only tool that can tell the model to stop.
+
+
+def status_of(run, page_name):
+    return run(lambda page: Kernel(page).session_status(), page_name)
+
+
+def test_the_banner_timeout_page_reads_logged_out(run):
+    out = status_of(run, "timeout.html")
+    assert out.startswith("LOGGED_OUT")
+    assert "session has been timeout" in out
+
+
+def test_a_page_that_offers_a_sign_out_reads_authed(run):
+    assert status_of(run, "menu.html").startswith("AUTHED")
+
+
+def test_a_sign_in_page_reads_logged_out(run):
+    out = status_of(run, "signin.html")
+    assert out.startswith("LOGGED_OUT") and "password" in out
+
+
+def test_a_page_with_no_evidence_either_way_reads_unknown(run):
+    assert status_of(run, "next.html").startswith("UNKNOWN")
+
+
+def test_prose_about_logging_in_does_not_read_logged_out(run):
+    """Also covers the hidden sign-in panel on that page: a password field
+    nobody can see is not an invitation to sign in."""
+    assert status_of(run, "prose.html").startswith("AUTHED")
+
+
+def test_session_status_acts_on_nothing_and_leaves_refs_standing(run):
+    async def go(page):
+        k = Kernel(page)
+        d = await k.view()
+        await k.session_status()
+        await k.click(ref_of(d, "Download"))   # the ref from before is still good
+        return await page.evaluate("() => window.__hit")
+
+    assert run(go) == "Download"
+
+
+def test_session_status_needs_no_view_first(run):
+    assert status_of(run, "menu.html").split(" — ")[0] in ("AUTHED", "LOGGED_OUT", "UNKNOWN")
 
 
 def test_refs_from_before_a_navigation_are_refused(run):

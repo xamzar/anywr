@@ -50,23 +50,27 @@ def _field(e, key):
     return e.get(key, "") if isinstance(e, dict) else getattr(e, key, "")
 
 
-def _clean(s):
+def clean(s):
     """Flatten to one line of bracket-free text.
 
     Whitespace collapses because a newline inside a page's own text would
     otherwise let the page forge a `[n] role name` line of its own. Angle
     brackets go because the digest is flat text, not markup: nothing a page
     controls should be able to look like a tag once it is in the context.
+
+    Public, not private, because the digest is no longer the only page-derived
+    text that reaches the model: base.py quotes option labels back in select()'s
+    errors, and those need the same scrubbing for the same reason.
     """
     return _WS.sub(" ", str(s or "").replace("<", " ").replace(">", " ")).strip()
 
 
 def _norm(e):
     """(role, name) for one raw element, cleaned and length-capped."""
-    name = _clean(_field(e, "name"))
+    name = clean(_field(e, "name"))
     if len(name) > MAX_NAME:
         name = name[:MAX_NAME - 1] + "…"
-    return _clean(_field(e, "role")).lower(), name
+    return clean(_field(e, "role")).lower(), name
 
 
 def _rank(raw, name):
@@ -85,7 +89,7 @@ def numbered(elements):
     for i, (role, name) in enumerate(map(_norm, elements)):
         if role not in INTERACTIVE or not name:
             continue
-        href = _clean(_field(elements[i], "href"))
+        href = clean(_field(elements[i], "href"))
         # Banner gives every menu item a bullet image wrapped in its own link to
         # the same target, so half of AIMS's refs are decorative twins of the
         # next one. Collapse a run of links sharing one href and keep the
@@ -139,7 +143,7 @@ def build_digest(url, title, elements, *, text="", max_tokens=DEFAULT_MAX_TOKENS
     named = sum(1 for role, name in map(_norm, elements) if role in INTERACTIVE and name)
     merged = named - len(els)
 
-    head = f"url: {_clean(url)}\ntitle: {_clean(title)}\n"
+    head = f"url: {clean(url)}\ntitle: {clean(title)}\n"
     foot = ""
     if unnamed:
         foot += f"({_plural(unnamed, 'unnamed element')} — not addressable)\n"

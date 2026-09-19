@@ -1,4 +1,5 @@
-"""The three base tools: view / click / fill, over one already-running page.
+"""The base tools: view / click / fill / select / session_status, over one
+already-running page.
 
 A ref is a *position in the filtered list* digest.py produced, so it only means
 anything against the page state that produced it. Everything below exists to
@@ -17,12 +18,16 @@ import urllib.request
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
-from kernel import digest
+from kernel import digest, session
 
 log = logging.getLogger("kernel.base")
 
 ACT_TIMEOUT_MS = 15_000
 LOAD_TIMEOUT_MS = 30_000
+# How many option labels an error lists before it starts counting instead. A
+# term dropdown holds a dozen; a country dropdown holds two hundred and would
+# cost more context than the digest it came from.
+MAX_OPTIONS = 40
 # A click may or may not navigate, and Playwright cannot tell us which before it
 # happens. Wait a beat so a navigation that is coming has committed, then wait
 # on the document that is actually there.
@@ -64,8 +69,35 @@ async def attach(playwright, cdp, *, tab=0, max_tokens=digest.DEFAULT_MAX_TOKENS
 
 # --- the tools --------------------------------------------------------------
 
+# Options as the page has them. `null` for anything that is not a dropdown, so
+# one evaluate answers both "is this a select?" and "what is in it?" -- two
+# would leave room for the element to change between them.
+JS_OPTIONS = """el => el.tagName !== 'SELECT' ? null
+  : [...el.options].map(o => ({label: o.label, value: o.value, disabled: o.disabled}))"""
+
+
+def _options_are(live, total):
+    """The options that exist, for the model to pick from.
+
+    A guessed option string is the likeliest way select() fails on a real page --
+    "Semester A 2026" against a dropdown that says "Semester A 2026/27" -- and
+    the real strings are the only thing that makes the next call right.
+    """
+    if not live:
+        return "It has no option that can be chosen."
+    names = [(label or value)[:digest.MAX_NAME] for _, label, value in live]
+    more = f" (+{len(names) - MAX_OPTIONS} more)" if len(names) > MAX_OPTIONS else ""
+    off = total - len(live)
+    # Counted rather than listed, in the digest's own style: offering an option
+    # that cannot be chosen would only buy a second failed call.
+    disabled = f" ({off} disabled option{'' if off == 1 else 's'} — not selectable)" if off else ""
+    return (f"Its options are: {', '.join(repr(n) for n in names[:MAX_OPTIONS])}{more}."
+            f"{disabled} Pass one of these exactly, as its label or as its value.")
+
+
 class Kernel:
-    """view / click / fill against one page, with the last view() remembered."""
+    """view / click / fill / select / session_status against one page, with the
+    last view() remembered."""
 
     def __init__(self, page, *, max_tokens=digest.DEFAULT_MAX_TOKENS):
         self._page = page
@@ -108,9 +140,68 @@ class Kernel:
                               f"{ACT_TIMEOUT_MS // 1000}s") from exc
         except PlaywrightError as exc:
             # Wrong kind of element is the common case and the message says so;
-            # it cannot quote the value, only the element.
-            raise KernelError(f"ref [{ref}] cannot be filled: {exc.message.splitlines()[0]}") from exc
+            # it cannot quote the value, only the element. A dropdown is the one
+            # wrong kind that now has a right answer, so it gets named: refusing
+            # without it is what left the model with nowhere to go.
+            hint = (" — this is a dropdown; use select(ref, option) instead"
+                    if self._shown[1][ref - 1].role == "combobox" else "")
+            raise KernelError(
+                f"ref [{ref}] cannot be filled: {exc.message.splitlines()[0]}{hint}") from exc
         return await self.view()
+
+    async def select(self, ref, option):
+        """Choose `option` in the dropdown at `ref`, then return the page.
+
+        Label first, value second. Playwright's select_option() takes a bare
+        string as either and keeps whichever option comes first in the document,
+        so on a page where one option is *labelled* "202630" and another one
+        *has that value*, which you get depends on the page's ordering. Here the
+        label always wins, because the label is what the digest showed the model
+        and what it therefore meant.
+        """
+        el = await self._resolve(ref)
+        shown = self._shown[1][ref - 1]  # _resolve just proved this still describes it
+        opts = await el.evaluate(JS_OPTIONS)
+        if opts is None:
+            raise KernelError(
+                f"ref [{ref}] is a {shown.role} ({shown.name!r}), not a dropdown, so there is "
+                f"nothing to select in it. select() works only on a dropdown (combobox); use "
+                f"click() for links and buttons and fill() for text fields.")
+        # A disabled option cannot be chosen, so offering it in the error would
+        # only buy a second failed call. Banner's "None" placeholder is one.
+        live = [(i, digest.clean(o["label"]), digest.clean(o["value"]))
+                for i, o in enumerate(opts) if not o["disabled"]]
+        want = digest.clean(option)
+        i = next((i for i, label, _ in live if label == want), None)
+        if i is None:
+            i = next((i for i, _, value in live if value == want), None)
+        if i is None:
+            raise KernelError(f"ref [{ref}] has no option {want!r}. {_options_are(live, len(opts))}")
+        log.debug("select ref=%s", ref)
+        try:
+            await el.select_option(index=i, timeout=ACT_TIMEOUT_MS)
+        except PlaywrightTimeout as exc:
+            raise KernelError(f"ref [{ref}] did not become selectable within "
+                              f"{ACT_TIMEOUT_MS // 1000}s") from exc
+        # A term dropdown that submits on change navigates; one that waits for a
+        # button does not. _settle() covers both, as it does for click().
+        await self._settle()
+        return await self.view()
+
+    async def session_status(self):
+        """Whether this page is a signed-in page: AUTHED / LOGGED_OUT / UNKNOWN.
+
+        Reads only -- it clicks nothing, needs no ref and leaves the last view()
+        standing, so it is always safe to ask before believing a result. The
+        elements it judges on are the ones view() numbers, so "a sign-out
+        control is present" means one the model could actually have clicked.
+        """
+        handle, raw = await self._extract()
+        await handle.dispose()
+        text = await self._page.evaluate("() => document.body ? document.body.innerText : ''")
+        return session.status(
+            self._page.url, await self._page.title(), text, digest.numbered(raw),
+            password_field=await self._page.evaluate(session.JS_PASSWORD_FIELD))
 
     # --- ref resolution -----------------------------------------------------
     # The whole point of this module. Re-running JS_CANDIDATES is chosen over

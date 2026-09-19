@@ -1,4 +1,4 @@
-"""The MCP surface: three tools, real CDP, and nothing leaking out of fill().
+"""The MCP surface: five tools, real CDP, and nothing leaking out of fill().
 
 The CDP half runs against a Chromium this file launches on localhost with
 --remote-debugging-port, so attach() is exercised for real -- /json/version,
@@ -25,6 +25,11 @@ MENU = """<!doctype html><title>Menu</title>
 <h1>Files</h1>
 <div id="list"><a href="#d" id="download">Download</a></div>
 <label for="q">Search term</label><input id="q" type="text">
+<label for="term">Term</label>
+<select id="term">
+  <option value="202630">Fall Semester 2026/27</option>
+  <option value="202710">Spring Semester 2026/27</option>
+</select>
 <a href="next.html" id="go">Next Page</a>
 """
 
@@ -54,13 +59,16 @@ def tool_names():
     return {t.name for t in asyncio.run(server.mcp.list_tools())}
 
 
-def test_the_tool_set_is_exactly_view_click_fill():
-    assert tool_names() == {"view", "click", "fill"}
+def test_the_tool_set_is_exactly_the_five_base_tools():
+    assert tool_names() == {"view", "click", "fill", "select", "session_status"}
 
 
 def test_the_tools_m1_cut_are_absent():
+    """select() left this list when Banner's Final Grades page turned out to be
+    unreachable without it; open() and evaluate() are still cut by design, and
+    the rest were never in M1's scope."""
     assert not tool_names() & {"open", "evaluate", "screenshot", "snapshot", "press",
-                               "select", "close_tab", "workspaces", "handoff"}
+                               "close_tab", "workspaces", "handoff", "back", "read"}
 
 
 def test_no_tool_takes_a_workspace():
@@ -181,6 +189,38 @@ def test_an_out_of_range_ref_is_a_result_not_an_exception(run):
 def test_acting_before_any_view_says_so(run):
     res = run(lambda page: call("click", ref=1))
     assert not res.is_error and "view()" in res.data
+
+
+# --- select and session_status ------------------------------------------------
+
+def test_select_through_the_tool_sets_the_dropdown_and_returns_the_digest(run):
+    async def go(page):
+        d = (await call("view")).data
+        out = (await call("select", ref=ref_of(d, "Term"),
+                          option="Spring Semester 2026/27")).data
+        return out, await page.input_value("#term")
+
+    out, value = run(go)
+    assert value == "202710"
+    assert "title: Menu" in out and "Term" in out
+
+
+def test_a_guessed_option_comes_back_as_a_result_listing_the_real_ones(run):
+    async def go(page):
+        d = (await call("view")).data
+        return await call("select", ref=ref_of(d, "Term"), option="Semester A 2026")
+
+    res = run(go)
+    assert not res.is_error and "Traceback" not in res.data
+    assert "'Fall Semester 2026/27'" in res.data and "'Spring Semester 2026/27'" in res.data
+
+
+def test_session_status_answers_unknown_on_a_page_with_no_evidence(run):
+    """The fixture has no sign-out control, no sign-in form and no notice —
+    which is most pages, and is why UNKNOWN has to be a real answer."""
+    res = run(lambda page: call("session_status"))
+    assert not res.is_error
+    assert res.data.startswith("UNKNOWN") and " — " in res.data
 
 
 # --- the value ---------------------------------------------------------------

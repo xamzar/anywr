@@ -28,10 +28,23 @@ recreates `soak` and destroys the running experiment.
 
 One browser, one task, no product around it. No auth, no isolation, hardcoded to one person.
 
-**Kernel v0 is three tools**: `view()`, `click(ref)`, `fill(ref, value)`. That is the
-timeline's scope and it is deliberately smaller than feels comfortable. `back()`,
-`read(region)`, `session_status()` and `submit`-preview are real needs but they are not what
-M1 is testing, and each one added now delays the number that M1 exists to produce.
+**Kernel v0 was three tools**: `view()`, `click(ref)`, `fill(ref, value)` — the timeline's
+scope, deliberately smaller than felt comfortable. Two more were added after the first live
+run against `work`, each because the three-tool kernel could not produce M1's deliverable:
+
+- **`select(ref, option)`** — Banner's Final Grades page picks a semester from a native
+  `<select>`. `fill` correctly refuses a combobox, which left the model with no way forward
+  and the measurement task unreachable.
+- **`session_status()`** — on 2026-09-19 an idled-out Banner session (15 min) rendered a
+  digest that looked entirely normal: full menu, 39 refs, no signal at all. An agent would
+  keep clicking and report empty results as fact. This is the failure the design synthesis
+  predicted, observed on the real portal.
+
+`back()`, `read(region)` and `submit`-preview remain deferred: they are real needs, but
+nothing in M1 is blocked on them.
+
+`findings-m1.md` must state that the measurement ran against a five-tool kernel — a fair
+comparison against stock Playwright MCP depends on which surface was measured.
 
 `open(url)` is **not** a tool. Banner kills a session on detected URL break-in. The kernel
 starts from whatever page the browser is already on.

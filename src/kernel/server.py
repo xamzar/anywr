@@ -1,9 +1,9 @@
-"""FastMCP wiring for the kernel: view / click / fill over one browser.
+"""FastMCP wiring for the kernel: five tools over one browser.
 
 One browser, one page, and no `workspace` argument anywhere: the CDP target is
-configuration (KERNEL_CDP), not something the model picks. The three tools are
-the whole surface on purpose -- no open(), no evaluate(), no screenshot -- so
-what M1 measures is the kernel and not a smaller Playwright server.
+configuration (KERNEL_CDP), not something the model picks. Five tools are the
+whole surface on purpose -- no open(), no evaluate(), no screenshot -- so what
+M1 measures is the kernel and not a smaller Playwright server.
 
 Not in here, deliberately: no db, no AGENT_ACTION logging. The kernel is not
 part of the soak experiment.
@@ -25,12 +25,15 @@ log = logging.getLogger("kernel.server")
 DEFAULT_CDP = "work:9223"
 
 mcp = FastMCP("kernel", instructions=(
-    "One browser, one page, three tools. view() returns the page as a numbered list of the "
-    "elements you can act on; click(ref) and fill(ref, value) take one of those numbers and "
-    "return the page's new digest. A ref only means anything against the digest it came from "
-    "— any change to the page renumbers them, so act on the most recent digest and call view() "
-    "again whenever a tool tells you a ref is stale. There is no way to navigate by URL: the "
-    "browser starts on whatever page it is already showing, and you move by clicking."))
+    "One browser, one page, five tools. view() returns the page as a numbered list of the "
+    "elements you can act on; click(ref), fill(ref, value) and select(ref, option) take one of "
+    "those numbers and return the page's new digest. A ref only means anything against the "
+    "digest it came from — any change to the page renumbers them, so act on the most recent "
+    "digest and call view() again whenever a tool tells you a ref is stale. There is no way to "
+    "navigate by URL: the browser starts on whatever page it is already showing, and you move "
+    "by clicking. session_status() answers the one question a digest cannot: a timed-out "
+    "session can serve a page that looks entirely normal, so ask it before reporting that "
+    "something is missing or empty."))
 
 # One page can only do one thing at a time, so the lock covers whole tool calls
 # rather than just the connect: a click landing between another call's view()
@@ -96,7 +99,7 @@ async def _run(name, op, *, secret=None):
                     "details. Call view() to see where the page actually is.")
 
 
-# --- the three tools --------------------------------------------------------
+# --- the tools --------------------------------------------------------------
 # The docstrings are the model's instructions, so every one of them says where
 # refs come from and when they stop being true.
 
@@ -138,6 +141,37 @@ async def fill(ref: int, value: str) -> str:
     return await _run("fill", lambda k: k.fill(ref, value), secret=value)
 
 
+@mcp.tool
+async def select(ref: int, option: str) -> str:
+    """Choose `option` in the dropdown at `ref`, then return the page as it now
+    is.
+
+    `ref` comes from the most recent digest, under the same rule as click():
+    stale refs are refused, not guessed. Only a dropdown (shown as `combobox`)
+    can be selected from — fill() cannot set one. `option` is matched against
+    the dropdown's visible labels first and its underlying values second; if it
+    matches neither, the error lists the options that really exist, so send one
+    of those back instead of guessing a second time.
+    """
+    return await _run("select", lambda k: k.select(ref, option))
+
+
+@mcp.tool
+async def session_status() -> str:
+    """Say whether this page is a signed-in page: AUTHED, LOGGED_OUT or UNKNOWN,
+    with the reason.
+
+    Takes no ref, changes nothing and leaves your refs valid. A session that has
+    idled out can serve a page that digests exactly like a live one — same menu,
+    same refs, same everything — so ask this before reporting that a page is
+    empty or that data is missing. LOGGED_OUT means what you read is not about
+    the account at all; UNKNOWN means this page carries no evidence either way
+    and is the honest answer for most pages, so treat it as "not confirmed"
+    rather than as "fine".
+    """
+    return await _run("session_status", lambda k: k.session_status())
+
+
 # --- transports -------------------------------------------------------------
 # One server definition, two ways in: http is the deployed path, stdio is what
 # Claude Desktop attaches to over an SSH tunnel.
@@ -145,7 +179,8 @@ async def fill(ref: int, value: str) -> str:
 def main(argv=None):
     logging.basicConfig(level=os.environ.get("KERNEL_LOG", "INFO").upper(), stream=sys.stderr,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    ap = argparse.ArgumentParser(description="MCP kernel: view / click / fill over one browser")
+    ap = argparse.ArgumentParser(
+        description="MCP kernel: view / click / fill / select / session_status over one browser")
     ap.add_argument("--transport", choices=("http", "stdio"),
                     default=os.environ.get("KERNEL_TRANSPORT", "http"))
     args = ap.parse_args(argv)
