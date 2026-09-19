@@ -1,0 +1,10 @@
+[Unit]
+Description=anywr browser egress firewall
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+ExecStart=/opt/anywr/fw.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

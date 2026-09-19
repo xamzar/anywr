@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>anywr</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --panel: #fff; --fg: #18181b; --muted: #52525b; --subtle: #a1a1aa;
+    --border: #e4e4e7; --brand: #4f46e5; --brand-fg: #4338ca; --brand-soft: #eef2ff;
+    --danger: #dc2626; --ok: #16a34a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0b0b0e; --panel: #141418; --fg: #f4f4f5; --muted: #a1a1aa; --subtle: #71717a;
+      --border: #27272a; --brand: #6366f1; --brand-fg: #a5b4fc; --brand-soft: #1e1b4b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { background: var(--panel); border-bottom: 1px solid var(--border); }
+  .bar { max-width: 960px; margin: 0 auto; padding: 0 16px; height: 56px; display: flex; align-items: center; gap: 12px; }
+  .brand { font-weight: 700; letter-spacing: -0.02em; font-size: 18px; color: var(--fg); text-decoration: none; }
+  .brand span { color: var(--brand-fg); }
+  .grow { flex: 1; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; display: grid; gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .card h2 { margin: 0 0 4px; font-size: 16px; }
+  .card p { margin: 0 0 12px; color: var(--muted); }
+  button, .btn { font: inherit; border-radius: 8px; padding: 8px 14px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel); color: var(--fg); text-decoration: none; display: inline-block; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button.danger { color: var(--danger); }
+  button.plain { border: 0; background: none; color: var(--muted); padding: 8px; }
+  button:disabled { opacity: .5; cursor: default; }
+  input { font: inherit; width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--fg); margin-bottom: 10px; }
+  input:focus, button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .auth { max-width: 380px; margin: 48px auto; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tabs button { flex: 1; }
+  .tabs button[aria-selected=true] { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-fg); }
+  .err { color: var(--danger); font-size: 14px; min-height: 1.5em; margin: 4px 0 0; }
+  .pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: var(--brand-soft); color: var(--brand-fg); }
+  .pill.running { background: #dcfce7; color: #166534; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .secret { word-break: break-all; background: var(--bg); border: 1px dashed var(--brand); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+  pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 6px 0 12px; }
+  .viewer { width: 100%; aspect-ratio: 1440 / 900; border: 1px solid var(--border); border-radius: 8px; background: #000; display: block; margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { text-align: left; padding: 6px 4px; border-top: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <a class="brand" href="https://anywr.me">any<span>wr</span></a>
+  <div class="grow"></div>
+  <span id="who" class="mono" style="color:var(--muted)"></span>
+  <button id="logout" class="plain" hidden>Sign out</button>
+</div></header>
+
+<!-- signed out: /signup, /login, or someone's /<username> -->
+<section id="auth" class="auth card" hidden>
+  <form id="f-signup" hidden>
+    <h2>Create your browser</h2>
+    <p>Pick the name for your page. You'll confirm your email with a one-time code next.</p>
+    <label for="invite">Invite code</label><input id="invite" autocomplete="off" required>
+    <label for="su-name">Username</label>
+    <div class="row" style="flex-wrap:nowrap;gap:0"><span class="mono" style="color:var(--muted);padding:0 6px 10px 0">anywr.me/</span>
+      <input id="su-name" autocomplete="username" pattern="[a-z0-9][a-z0-9-]{1,28}[a-z0-9]" title="3-30 characters: a-z, 0-9, dashes" required></div>
+    <button class="primary" style="width:100%">Continue with email</button>
+  </form>
+  <form id="f-find" hidden>
+    <h2>Sign in</h2>
+    <label for="find-name">Your page</label>
+    <div class="row" style="flex-wrap:nowrap;gap:0"><span class="mono" style="color:var(--muted);padding:0 6px 10px 0">anywr.me/</span>
+      <input id="find-name" autocomplete="username" required></div>
+    <button class="primary" style="width:100%">Continue</button>
+    <p style="margin-top:12px;font-size:14px">New here? <a href="/signup">Create a browser</a></p>
+  </form>
+  <form id="f-login" hidden>
+    <h2 class="mono" id="login-title"></h2>
+    <p>Sign in with a one-time code sent to this page's email address.</p>
+    <button class="primary" style="width:100%">Email me a code</button>
+  </form>
+  <div id="nouser" hidden><h2>Nobody here yet</h2><p><span id="nouser-name" class="mono"></span> is free. <a href="/signup">Claim it with an invite</a>.</p></div>
+  <p class="err" id="auth-err"></p>
+</section>
+
+<!-- signed in -->
+<main id="dash" hidden>
+  <div class="card">
+    <div class="row"><h2 class="grow">Your browser</h2><span id="bstate" class="pill"></span></div>
+    <p>A Chrome that lives in the cloud and stays signed in. It sleeps after 30 minutes idle and wakes on the next request; logins survive.</p>
+    <div class="row">
+      <button id="view" class="primary">Open viewer</button>
+      <button id="bstop">Put to sleep</button>
+    </div>
+    <iframe id="viewer" class="viewer" title="Live view of your cloud browser" hidden></iframe>
+  </div>
+
+  <div class="card">
+    <h2>Connect your agent</h2>
+    <p>One private URL gives an MCP client (Claude, Claude Code, Cursor…) control of this browser and nothing else. It's shown once; making a new one kills the old one.</p>
+    <p id="agent-info" class="mono"></p>
+    <div id="agent-new" hidden>
+      <div class="secret mono" id="agent-url"></div>
+      <div class="row" style="margin-bottom:12px"><button id="copy">Copy</button></div>
+      <label>claude.ai / Claude app: Settings → Connectors → Add custom connector → paste the URL.</label>
+      <label>Claude Code:</label>
+      <pre id="agent-cli"></pre>
+    </div>
+    <div class="row">
+      <button id="agent-make" class="primary">Create link</button>
+      <button id="agent-revoke" class="danger" hidden>Revoke</button>
+    </div>
+  </div>
+
+  <div class="card" id="admin" hidden>
+    <div class="row"><h2 class="grow">Invites</h2><button id="inv-make" class="primary">New invite</button></div>
+    <p>Each code signs up one person. Send them the link.</p>
+    <table><thead><tr><th>Sign-up link</th><th>Used by</th></tr></thead><tbody id="inv"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>Delete account</h2>
+    <p>Deletes your browser, its profile (every login in it), your agent link and your account.</p>
+    <div class="row"><button id="del" class="danger">Delete everything</button></div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, { credentials: "same-origin", headers: { "content-type": "application/json" }, ...opts });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || r.statusText);
+  return d;
+};
+const ago = (t) => t ? new Date(t * 1000).toLocaleString() : "never";
+let beat = null;
+const path = decodeURIComponent(location.pathname.slice(1)).toLowerCase();
+const show = (id) => { $("auth").hidden = false; $(id).hidden = false; };
+const fail = (err) => { $("auth-err").textContent = err.message; };
+
+// Cloudflare Access proves the email and sends the browser back to /auth/callback.
+async function startLogin(body) {
+  try { location.href = (await api("/api/login", { method: "POST", body: JSON.stringify(body) })).url; }
+  catch (err) { fail(err); }
+}
+$("f-signup").onsubmit = (e) => { e.preventDefault(); startLogin({ username: $("su-name").value, invite: $("invite").value }); };
+$("f-login").onsubmit = (e) => { e.preventDefault(); startLogin({ username: path }); };
+$("f-find").onsubmit = (e) => { e.preventDefault(); location.href = "/" + $("find-name").value.trim().toLowerCase(); };
+$("su-name").oninput = (e) => { e.target.value = e.target.value.toLowerCase(); };
+const inviteParam = new URLSearchParams(location.search).get("invite");
+if (inviteParam) $("invite").value = inviteParam;
+$("logout").onclick = async () => { await api("/api/logout", { method: "POST" }); location.reload(); };
+
+function renderState(s) {
+  $("bstate").textContent = s === "none" ? "not created yet" : s;
+  $("bstate").className = "pill " + s;
+  $("bstop").disabled = s !== "running";
+}
+
+function openViewer() {
+  $("view").textContent = "Starting…"; $("view").disabled = true;
+  // /view/* is authorised by this session cookie; Caddy picks your container.
+  $("viewer").src = "/view/vnc.html?path=view/websockify&autoconnect=1&resize=scale&reconnect=1";
+  $("viewer").hidden = false;
+  $("viewer").onload = () => { $("view").textContent = "Viewer open"; renderState("running"); };
+  clearInterval(beat);
+  beat = setInterval(() => api("/api/browser/touch", { method: "POST" }).catch(() => {}), 60000);
+  $("viewer").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+$("view").onclick = openViewer;
+$("bstop").onclick = async () => {
+  clearInterval(beat); $("viewer").hidden = true; $("viewer").src = "about:blank";
+  $("view").textContent = "Open viewer"; $("view").disabled = false;
+  renderState((await api("/api/browser/stop", { method: "POST" })).browser);
+};
+
+function renderAgent(info) {
+  $("agent-info").textContent = info ? `Link created ${ago(info.created_at)} · last used ${ago(info.last_used_at)}` : "No link yet.";
+  $("agent-make").textContent = info ? "Replace link" : "Create link";
+  $("agent-revoke").hidden = !info;
+}
+$("agent-make").onclick = async () => {
+  if ($("agent-revoke").hidden === false && !confirm("The current link stops working immediately. Continue?")) return;
+  const { url } = await api("/api/agent", { method: "POST" });
+  $("agent-url").textContent = url;
+  $("agent-cli").textContent = `claude mcp add --transport http anywr ${url}`;
+  $("agent-new").hidden = false;
+  renderAgent({ created_at: Date.now() / 1000 });
+};
+$("copy").onclick = () => navigator.clipboard.writeText($("agent-url").textContent).then(() => $("copy").textContent = "Copied");
+$("agent-revoke").onclick = async () => {
+  if (!confirm("Revoke the agent link?")) return;
+  await api("/api/agent", { method: "DELETE" });
+  $("agent-new").hidden = true; renderAgent(null);
+};
+
+async function loadInvites() {
+  const rows = await api("/api/invites");
+  $("inv").replaceChildren(...rows.map((r) => {
+    const tr = document.createElement("tr");
+    const link = `${location.origin}/signup?invite=${r.code}`;
+    tr.innerHTML = "<td class='mono'></td><td></td>";
+    tr.children[0].textContent = r.used_at ? r.code : link;
+    tr.children[1].textContent = r.used_at ? (r.username ? "anywr.me/" + r.username : "deleted account") : "unused";
+    return tr;
+  }));
+}
+$("inv-make").onclick = async () => { await api("/api/invites", { method: "POST" }); loadInvites(); };
+
+$("del").onclick = async () => {
+  const name = prompt("This cannot be undone. Type your username to delete everything:");
+  if (!name) return;
+  try { await api("/api/account/delete", { method: "POST", body: JSON.stringify({ username: name }) }); location.href = "/"; }
+  catch (err) { alert(err.message); }
+};
+
+async function load() {
+  const s = await api("/api/session");
+  const u = s.user;
+  $("logout").hidden = !u;
+  $("who").textContent = u ? "anywr.me/" + u.username : "";
+  if (path === "signup") return show("f-signup");
+  if (path === "login") return u ? location.replace("/" + u.username) : show("f-find");
+  if (!u || u.username !== path) {
+    // Someone's page, and we're not them (or not signed in).
+    if (!(await api("/api/user/" + encodeURIComponent(path))).exists) {
+      $("nouser-name").textContent = "anywr.me/" + path; return show("nouser");
+    }
+    $("login-title").textContent = "anywr.me/" + path;
+    if (u) $("auth-err").textContent = `You're signed in as anywr.me/${u.username}; continuing signs you in to this page instead.`;
+    return show("f-login");
+  }
+  $("dash").hidden = false;
+  document.title = "anywr.me/" + u.username;
+  renderState(s.browser);
+  renderAgent(s.agent);
+  $("admin").hidden = !u.admin;
+  if (u.admin) loadInvites();
+  if (location.hash === "#browser") openViewer();
+}
+load();
+</script>
+</body>
+</html>
