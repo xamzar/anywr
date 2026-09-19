@@ -55,6 +55,8 @@ DB_PATH = os.environ.get("DB", "/data/anywr.db")
 IMAGE = os.environ.get("CHROME_IMAGE", "anywr-chrome")
 SELF = os.environ.get("SELF_CONTAINER", "anywr-api")      # attached to every user network
 CADDY = os.environ.get("CADDY_CONTAINER", "anywr-caddy")  # likewise, for the viewer
+# DEMO ONLY: any 6-digit code signs anyone in, no email is sent. Unset to revert.
+DEMO_OTP = os.environ.get("DEMO_OTP") == "1"
 MAX_USERS = int(os.environ.get("MAX_USERS", "45"))         # Access free plan: 50 seats
 MAX_RUNNING = int(os.environ.get("MAX_RUNNING", "6"))     # ~1 GB each on an 8 GB box
 IDLE = int(os.environ.get("IDLE_MINUTES", "30")) * 60
@@ -471,6 +473,8 @@ async def login_start(b: Start, resp: Response):
     q("INSERT INTO logins VALUES (?,?,?)", (h(st), json.dumps(intent), now() + 600))
     # The ticket must come back to the same browser that started the login.
     resp.set_cookie(STATE_COOKIE, st, max_age=600, httponly=True, secure=True, samesite="lax", path="/auth")
+    if DEMO_OTP:
+        return {"url": "/auth/demo"}
     if "login" in intent:
         url = await prefill(st, u["email"])
         if url:
@@ -542,8 +546,11 @@ async def login_finish(request: Request, t: str = ""):
     q("DELETE FROM logins WHERE state_hash=?", (h(st),))
     if not row:
         return oops("That sign-in expired. Start again from your page.")
-    intent, email = json.loads(row["intent"]), d["e"].strip().lower()
+    return finish(json.loads(row["intent"]), d["e"].strip().lower())
 
+
+def finish(intent, email):
+    """The email is proven (Access ticket, or demo mode): sign in or sign up."""
     if "login" in intent:
         u = one("SELECT id, username, email FROM users WHERE id=?", (intent["login"],))
         if not u or u["email"].lower() != email:
@@ -573,6 +580,58 @@ async def login_finish(request: Request, t: str = ""):
     set_cookie(resp, new_session(uid))
     resp.delete_cookie(STATE_COOKIE, path="/auth")
     return resp
+
+
+DEMO_PAGE = """<!doctype html><meta name=viewport content="width=device-width,initial-scale=1"><title>anywr</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&display=swap" rel=stylesheet>
+<style>:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:16px;background:#000;color:#ededed;
+ font:15px/1.5 "Instrument Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+form{width:min(360px,100%)}label{display:block;color:#8a8a8a;font-size:14px}
+input{display:block;width:100%;margin:6px 0 24px;padding:6px 0;font:500 28px/1.2 "Instrument Sans",system-ui,sans-serif;
+ color:#ededed;background:none;border:0;border-bottom:1px solid #262626;border-radius:0}
+input[name=code]{letter-spacing:.2em}input:focus{outline:none;border-bottom-color:#ededed}
+button{font:500 14px/1 "Instrument Sans",system-ui,sans-serif;color:#000;background:#ededed;border:1px solid #ededed;
+ border-radius:6px;padding:9px 14px;cursor:pointer}p{color:#8a8a8a;font-size:14px}</style>
+<form method=post action=/auth/demo>{EMAIL}<label for=code>Code from your email</label>
+<input id=code name=code inputmode=numeric pattern="\\d{6}" maxlength=6 autocomplete=one-time-code required {AF}>
+<button>Sign in</button><p>Demo mode: any 6 digits work.</p></form>"""
+EMAIL_FIELD = """<label for=email>Your email</label>
+<input id=email name=email type=email autocomplete=email required autofocus>"""
+
+
+def _pending(request):
+    st = request.cookies.get(STATE_COOKIE, "")
+    row = st and one("SELECT intent FROM logins WHERE state_hash=? AND expires_at>?", (h(st), now()))
+    return st, (json.loads(row["intent"]) if row else None)
+
+
+@api.get("/auth/demo", include_in_schema=False)
+async def demo_page(request: Request):
+    st, intent = _pending(request)
+    if not DEMO_OTP or not intent:
+        return oops("That sign-in expired. Start again from your page.")
+    signup = "signup" in intent
+    return HTMLResponse(DEMO_PAGE.replace("{EMAIL}", EMAIL_FIELD if signup else "").replace("{AF}", "" if signup else "autofocus"))
+
+
+@api.post("/auth/demo", include_in_schema=False)
+async def demo_finish(request: Request):
+    st, intent = _pending(request)
+    if not DEMO_OTP or not intent:
+        return oops("That sign-in expired. Start again from your page.")
+    f = {k: v[0] for k, v in parse_qs((await request.body()).decode()).items()}
+    if not re.fullmatch(r"\d{6}", f.get("code", "")):
+        return oops("The code is 6 digits.")
+    q("DELETE FROM logins WHERE state_hash=?", (h(st),))
+    if "login" in intent:
+        u = one("SELECT email FROM users WHERE id=?", (intent["login"],))
+        email = u["email"] if u else ""
+    else:
+        email = f.get("email", "").strip().lower()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            return oops("That doesn't look like an email address.")
+    return finish(intent, email)
 
 
 @api.post("/api/logout")
