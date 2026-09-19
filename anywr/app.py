@@ -88,6 +88,10 @@ CREATE TABLE IF NOT EXISTS agent_tokens (
 -- A login in flight: what to do once Access has verified an email.
 CREATE TABLE IF NOT EXISTS logins (
     state_hash TEXT PRIMARY KEY, intent TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS macros (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL,
+    description TEXT NOT NULL, steps TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, name));
 """
 
 
@@ -286,7 +290,8 @@ mcp = FastMCP("anywr", instructions=(
     "Drive the user's own cloud Chrome, which stays logged in between sessions. Selectors are "
     "Playwright selectors: `role=button[name=\"Sign in\"]`, `text=Next`, `#id`, or CSS. Read a page "
     "with snapshot() (accessibility tree) before acting. For logins, 2FA or captchas, call handoff() "
-    "and ask the user to finish in the viewer, then continue."))
+    "and ask the user to finish in the viewer, then continue. For any workflow you repeat, "
+    "check macros() first and save_macro() new ones, so later runs cost one call."))
 _pw = None
 _browsers = {}
 
@@ -413,6 +418,95 @@ async def handoff(reason: str) -> str:
     link to give them; call snapshot() once they say they're done."""
     await _ctx()
     return f"Ask the user to open {BASE}/{_username()}#browser and: {reason}. Wait for them to confirm."
+
+
+# Macros: the user's own saved step lists, so a repeated workflow costs the agent
+# one call and one result instead of a dozen snapshots. Steps only reach the
+# tools above (never Python), so a macro can do nothing the agent couldn't.
+async def _wait(target: str | int, tab: int = 0) -> str:
+    page = await _page(tab)
+    await (page.wait_for_timeout(target) if isinstance(target, int)
+           else page.locator(target).first.wait_for(timeout=30_000))
+    return await _state(page, tab)
+
+
+STEPS = {"open": navigate, "click": click, "fill": fill, "press": press, "select": select,
+         "evaluate": evaluate, "snapshot": snapshot, "wait": _wait}
+PARAM_RE = re.compile(r"\{\{(\w+)\}\}")
+
+
+def _subst(v, args, js):
+    """{{name}} -> the argument; inside evaluate's js, as a JSON literal so quotes can't break out."""
+    if not isinstance(v, str):
+        return v
+    def one_(m):
+        if m[1] not in args:
+            raise ValueError(f"missing argument {m[1]!r}")
+        return json.dumps(args[m[1]]) if js else str(args[m[1]])
+    return PARAM_RE.sub(one_, v)
+
+
+@mcp.tool
+async def save_macro(name: str, description: str, steps: list[dict]) -> str:
+    """Create or replace a macro: a saved workflow you can later run in one call with
+    run_macro(), returning only its last step's output. Use it whenever you notice
+    yourself repeating the same clicks/extraction. Each step is {"tool": ..., ...args}
+    with tool one of open(url), click(selector), fill(selector, value), press(key,
+    selector?), select(selector, option), wait(target: selector or ms), snapshot(),
+    evaluate(js). {{param}} anywhere in a string is filled from run_macro's args (as a
+    JSON literal inside js). Steps run in the macro's current tab; open() moves it to
+    the new tab. End with an evaluate() that returns just the data you need."""
+    if not re.fullmatch(r"[a-z0-9_-]{1,40}", name):
+        raise ValueError("name: 1-40 chars of a-z 0-9 _ -")
+    for i, s in enumerate(steps):
+        if s.get("tool") not in STEPS:
+            raise ValueError(f"step {i}: tool must be one of {sorted(STEPS)}")
+    old = one("SELECT 1 FROM macros WHERE user_id=? AND name=?", (_uid(), name))
+    q("INSERT OR REPLACE INTO macros VALUES (?,?,?,?,?)",
+      (_uid(), name, description, json.dumps(steps), now()))
+    return f"{'updated' if old else 'saved'} {name} ({len(steps)} steps)"
+
+
+@mcp.tool
+async def macros(name: str | None = None) -> str:
+    """List saved macros with their parameters, or show one macro's steps (to edit it:
+    change them and save_macro() under the same name)."""
+    if name:
+        m = one("SELECT description, steps FROM macros WHERE user_id=? AND name=?", (_uid(), name))
+        if not m:
+            raise ValueError(f"no macro {name!r}")
+        return f"{name}: {m['description']}\n{m['steps']}"
+    rows, _ = q("SELECT name, description, steps FROM macros WHERE user_id=? ORDER BY name", (_uid(),))
+    return "\n".join(f"{r['name']}({', '.join(sorted(set(PARAM_RE.findall(r['steps']))))}): {r['description']}"
+                     for r in rows) or "no macros yet (see save_macro)"
+
+
+@mcp.tool
+async def run_macro(name: str, args: dict | None = None, tab: int = 0) -> str:
+    """Run a saved macro in a tab. Returns only the last step's output, or where it failed."""
+    m = one("SELECT steps FROM macros WHERE user_id=? AND name=?", (_uid(), name))
+    if not m:
+        raise ValueError(f"no macro {name!r}; see macros()")
+    out = ""
+    for i, s in enumerate(json.loads(m["steps"])):
+        kw = {k: _subst(v, args or {}, s["tool"] == "evaluate") for k, v in s.items() if k != "tool"}
+        try:
+            if s["tool"] == "open":
+                ctx = await _ctx()
+                out = await navigate(kw["url"], kw.get("tab"))
+                tab = len(ctx.pages) - 1 if kw.get("tab") is None else kw["tab"]
+            else:
+                out = await STEPS[s["tool"]](**{"tab": tab, **kw})
+        except Exception as e:
+            return f"step {i} ({s['tool']}) failed: {e}"
+    return out
+
+
+@mcp.tool
+async def delete_macro(name: str) -> str:
+    """Delete a saved macro."""
+    _, cur = q("DELETE FROM macros WHERE user_id=? AND name=?", (_uid(), name))
+    return f"deleted {name}" if cur.rowcount else f"no macro {name!r}"
 
 
 mcp_app = mcp.http_app(path="/mcp", stateless_http=True)

@@ -8,6 +8,9 @@ kernel) is the obvious next swap.
 - **Site:** https://anywr.me — sign-in; `/signup` (username); `/<username>` (sign-in + dashboard)
 - **MCP:** `https://anywr.me/mcp/<token>`, one per user, minted on their page
 - **Viewer:** `https://anywr.me/<username>#browser` (KasmVNC at `/view/*`, authorised by the session cookie)
+- **Macros:** `save_macro` / `macros` / `run_macro` / `delete_macro` let the agent keep its own
+  per-user workflows (step lists over the same tools, `{{param}}` placeholders, `macros` table),
+  so a repeated job is one call returning only the last step's output
 
 ```
 browser --> anywr.me (Namecheap DNS, A -> VM 34.92.189.68) --> Caddy --> api (app.py)

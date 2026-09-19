@@ -67,11 +67,11 @@ def sign_in(c, email, **start):
     return c.get("/auth/callback", params={"t": ticket(email, st)}, follow_redirects=False)
 
 
-def mcp_call(c, url, tool, spoof=None):
+def mcp_call(c, url, tool, spoof=None, **args):
     hdr = {"accept": "application/json, text/event-stream", "content-type": "application/json"}
     if spoof:
         hdr["x-anywr-user"] = spoof
-    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": {}}}
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}
     r = c.post(url, headers=hdr, json=body)
     return r.status_code, r.text
 
@@ -126,6 +126,28 @@ with new_client() as c:
     assert st_ == 200 and f"ensure_running(u{b_id})" in text, (st_, text)
     assert mcp_call(c2, "/mcp/" + "A" * 43, "tabs")[0] == 401
     assert mcp_call(c2, "/mcp/.well-known", "tabs")[0] == 404
+    # macros: per-user CRUD, {{param}} filled in (JSON-quoted in js), tab follows open()
+    calls = []
+    def fake_step(tool):
+        async def f(*a, **kw):
+            calls.append((tool, a, kw))
+            return f"{tool} done"
+        return f
+    for t in ("click", "evaluate"):
+        A.STEPS[t] = fake_step(t)
+    steps = [{"tool": "click", "selector": "text={{who}}"},
+             {"tool": "evaluate", "js": "document.title + {{who}}"}]
+    assert "saved" in mcp_call(c2, path, "save_macro", name="greet", description="d", steps=steps)[1]
+    assert "updated" in mcp_call(c2, path, "save_macro", name="greet", description="hi", steps=steps)[1]
+    assert "tool must be one of" in mcp_call(c2, path, "save_macro", name="x", description="", steps=[{"tool": "rm"}])[1]
+    assert "greet(who): hi" in mcp_call(c2, path, "macros")[1]
+    _, text = mcp_call(c2, path, "run_macro", name="greet", args={"who": 'a"b'}, tab=2)
+    assert "evaluate done" in text, text
+    assert calls == [("click", (), {"tab": 2, "selector": 'text=a"b'}),
+                     ("evaluate", (), {"tab": 2, "js": 'document.title + "a\\"b"'})], calls
+    assert "missing argument 'who'" in mcp_call(c2, path, "run_macro", name="greet")[1]
+    assert "no macros yet" in mcp_call(c, "/mcp/" + c.post("/api/agent").json()["url"].split("/mcp/")[1], "macros")[1]
+    assert "deleted" in mcp_call(c2, path, "delete_macro", name="greet")[1]
     url2 = c2.post("/api/agent").json()["url"]
     assert mcp_call(c2, path, "tabs")[0] == 401           # rotated
     c2.delete("/api/agent")
